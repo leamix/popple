@@ -30,6 +30,8 @@ export class BubbleState {
   reset() {
     this.x = 0;
     this.y = 0;
+    this.popX = 0;
+    this.popY = 0;
     this.compression = 0;
     this.bulge = 0;
     this.popped = false;
@@ -111,6 +113,10 @@ export class BubbleState {
         force * (DEFAULT_HOLD_SECONDS - MIN_HOLD_SECONDS);
       this.holdProgress = clamp(this._heldSeconds / duration, 0, 1);
       if (this._heldSeconds + 1e-9 >= duration) {
+        // Preserve the actual latest contact, not the spring-smoothed x/y.
+        // These coordinates stay fixed while the released film settles.
+        this.popX = this._targetX;
+        this.popY = this._targetY;
         this.popped = true;
         this.active = false;
         this.holdProgress = 1;

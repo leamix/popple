@@ -57,6 +57,51 @@ test('off-centre contact retains its direction and displaces more air', () => {
   assert.ok(edge.y < -0.15);
 });
 
+test('opposite edge ruptures preserve their contact after release and settling', () => {
+  for (const [x, y] of [[-0.8, 0.25], [0.8, -0.25]]) {
+    const bubble = new BubbleState(8);
+    bubble.press(x, y);
+    assert.equal(advance(bubble, 0.8), 1);
+    assert.equal(bubble.popX, x);
+    assert.equal(bubble.popY, y);
+    bubble.release();
+    assert.equal(bubble.move(-x, -y), false);
+    assert.equal(bubble.press(-x, -y), false);
+    advance(bubble, 1.5);
+    assert.equal(bubble.popX, x);
+    assert.equal(bubble.popY, y);
+    assert.ok(Math.abs(bubble.x) < 0.001 && Math.abs(bubble.y) < 0.001,
+      'live deformation may recenter without moving the saved rupture contact');
+  }
+});
+
+test('rupture captures the latest contact even when the deformation still lags', () => {
+  const bubble = new BubbleState(9);
+  bubble.press(-0.65, 0.2);
+  advance(bubble, 0.77);
+  bubble.move(0.7, -0.3);
+  assert.ok(bubble.x < 0, 'the spring has not reached the new contact');
+  assert.equal(bubble.step(0.02), true);
+  assert.equal(bubble.popX, 0.7);
+  assert.equal(bubble.popY, -0.3);
+  assert.ok(bubble.x < 0, 'the saved position must not come from the lagging spring');
+});
+
+test('reset clears the rupture contact and the next rupture captures a new one', () => {
+  const bubble = new BubbleState(10);
+  bubble.press(0.6, -0.4);
+  advance(bubble, 0.8);
+  bubble.reset();
+  assert.equal(bubble.popX, 0);
+  assert.equal(bubble.popY, 0);
+  bubble.press(-0.5, 0.35);
+  assert.equal(bubble.popX, 0);
+  assert.equal(bubble.popY, 0);
+  assert.equal(advance(bubble, 0.8), 1);
+  assert.equal(bubble.popX, -0.5);
+  assert.equal(bubble.popY, 0.35);
+});
+
 test('variable force accelerates a pop but a fixed hardware value does not', () => {
   const variable = new BubbleState(4);
   const fixed = new BubbleState(5);
@@ -97,7 +142,7 @@ test('stalled, invalid and negative frames cannot jump the hold or corrupt state
   assert.equal(bubble.holdProgress, 0);
   assert.equal(bubble.step(1000, 1000), false);
   assert.ok(bubble.holdProgress < 0.13);
-  for (const key of ['x', 'y', 'compression', 'bulge', 'collapse', 'popAge', 'holdProgress']) {
+  for (const key of ['x', 'y', 'popX', 'popY', 'compression', 'bulge', 'collapse', 'popAge', 'holdProgress']) {
     assert.ok(Number.isFinite(bubble[key]), `${key} stays finite`);
   }
 });

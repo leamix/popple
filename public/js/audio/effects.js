@@ -1,3 +1,5 @@
+import { PopSequence, synthesizePop } from './sound.js';
+
 // Short, dry plastic transients and perimeter-only comic accents.
 // Everything is generated locally: no audio download or external dependencies.
 
@@ -20,9 +22,8 @@ export class PopAudio {
   constructor() {
     this.enabled = true;
     this.context = null;
-    this.buffers = [];
+    this.sequence = new PopSequence();
     this.sources = new Set();
-    this.index = 0;
     this.output = null;
     this.limiter = null;
     this.disposed = false;
@@ -57,7 +58,6 @@ export class PopAudio {
         this.limiter.connect(this.ceiling);
         this.ceiling.connect(this.output);
         this.output.connect(this.context.destination);
-        this.buffers = [1089, 4207, 9817, 26131].map((seed) => this.makeSnap(seed));
 
         // A silent source primes older WebKit implementations without a beep.
         const silent = this.context.createBufferSource();
@@ -75,43 +75,10 @@ export class PopAudio {
     return this.context.resume().then(() => true).catch(() => false);
   }
 
-  makeSnap(seed) {
-    const rate = this.context.sampleRate;
-    const duration = 0.135;
-    const buffer = this.context.createBuffer(1, Math.ceil(rate * duration), rate);
-    const data = buffer.getChannelData(0);
-    const random = randomFrom(seed);
-    const frequency = 195 + random() * 38;
-    const cracks = [0.013 + random() * 0.006, 0.027 + random() * 0.008,
-      0.049 + random() * 0.006, 0.068 + random() * 0.014];
-    let low = 0;
-    let last = 0;
-    let peak = 0;
-    for (let i = 0; i < data.length; i++) {
-      const t = i / rate;
-      const noise = random() * 2 - 1;
-      low += 0.19 * (noise - low);
-      const dry = noise - low * 0.85;
-      const attack = Math.min(1, t / 0.00045);
-      const snap = dry * Math.exp(-t / 0.0075) * attack;
-      const body = Math.sin(TAU * frequency * t) * Math.exp(-t / 0.0095) * 0.55;
-      let crackle = 0;
-      for (let j = 0; j < cracks.length; j++) {
-        const dt = t - cracks[j];
-        if (dt > 0) {
-          crackle += dry * Math.exp(-dt / (0.0025 + j * 0.0007)) *
-            Math.min(1, dt / 0.0003) * (0.22 / (j + 1));
-        }
-      }
-      // A very short low-pass smooths ultrasonics while retaining the crack.
-      const sample = snap * 1.35 + body + crackle;
-      last += 0.79 * (sample - last);
-      const tail = Math.min(1, (duration - t) / 0.008);
-      data[i] = last * tail;
-      peak = Math.max(peak, Math.abs(data[i]));
-    }
-    const normalization = 0.96 / Math.max(peak, 0.01);
-    for (let i = 0; i < data.length; i++) data[i] *= normalization;
+  makeSnap(seed, family) {
+    const { samples } = synthesizePop(this.context.sampleRate, seed, family);
+    const buffer = this.context.createBuffer(1, samples.length, this.context.sampleRate);
+    buffer.getChannelData(0).set(samples);
     return buffer;
   }
 
@@ -120,8 +87,10 @@ export class PopAudio {
     if (!this.enabled || !ctx || this.disposed || ctx.state !== 'running') return false;
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
-    source.buffer = this.buffers[this.index++ % this.buffers.length];
-    source.playbackRate.value = 0.97 + Math.random() * 0.07;
+    const next = this.sequence.next();
+    // A fresh physical envelope for every pop, not a pitch-shifted sample loop.
+    source.buffer = this.makeSnap(next.seed, next.family);
+    source.playbackRate.value = 0.985 + Math.random() * 0.03;
     gain.gain.value = clamp(strength, 0.2, 1.15);
     source.connect(gain);
     gain.connect(this.limiter);
@@ -151,7 +120,6 @@ export class PopAudio {
     this.sources.clear();
     this.context?.close().catch(() => {});
     this.context = null;
-    this.buffers = [];
   }
 }
 

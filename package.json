@@ -2,5 +2,5 @@
   "name": "no-rush-bubble-study",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.mjs", "test": "node --test physics.test.mjs" }
+  "scripts": { "start": "node server.mjs", "test": "node --test physics.test.mjs layout.test.mjs membrane.test.mjs sound.test.mjs" }
 }

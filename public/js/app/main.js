@@ -1,13 +1,14 @@
 import { BubbleState } from './physics.js';
 import { FilmRenderer } from './renderer.js';
 import { PopAudio, BurstLayer } from './effects.js';
+import { BUBBLE_COUNT, createBubbleLayout } from './layout.js';
 
 const $ = selector => document.querySelector(selector);
 const storage = {
   get(key, fallback) { try { return localStorage.getItem('bubble.'+key) ?? fallback; } catch { return fallback; } },
   set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }
 };
-const bubbles=Array.from({length:9},(_,i)=>new BubbleState(i));
+const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i));
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
 const pointers=new Map();
@@ -48,8 +49,8 @@ function tick(ms) {
       buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул`);
       buttons[i].setAttribute('aria-disabled','true');
       const count=bubbles.filter(b=>b.popped).length;
-      $('#announcement').textContent=`Хлоп! ${count} из 9 пузырьков лопнули.`;
-      $('#caption').textContent=count===9?'Вся плёнка твоя. Возьмём ещё?':'Вот и всё. Можно ещё один.';
+      $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
+      $('#caption').textContent=count===bubbles.length?'Вся плёнка твоя. Возьмём ещё?':'Вот и всё. Можно ещё один.';
       animateUntil=now+1.1;
       if(navigator.vibrate&&!reduced) navigator.vibrate(12);
     }
@@ -69,19 +70,17 @@ function cancelAll() {
 }
 function resize() {
   cancelAll();effects.clear();
-  const width=Math.min(window.innerWidth-12,diameter*3+108);
-  const pitch=(width-72)/3;
-  const actualDiameter=Math.min(diameter,pitch-8);
-  const origin=(width-pitch*2)/2;
-  const stage=$('.playground');stage.style.width=width+'px';stage.style.height=width+'px';
-  layout=bubbles.map((_,i)=>({x:origin+(i%3)*pitch,y:origin+Math.floor(i/3)*pitch,radius:actualDiameter/2}));
+  const geometry=createBubbleLayout(window.innerWidth,diameter);
+  const {width,height,diameter:actualDiameter}=geometry;
+  const stage=$('.playground');stage.style.width=width+'px';stage.style.height=height+'px';
+  layout=geometry.layout;
   for(let i=0;i<buttons.length;i++) {
     const p=layout[i],button=buttons[i];
     Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
   }
   const dpr=Math.min(devicePixelRatio||1,2.5);
-  renderer?.resize(width,width,dpr);
-  effects.resize(width+burstPadding*2,width+burstPadding*2,dpr);
+  renderer?.resize(width,height,dpr);
+  effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
   $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
   wake();
 }
@@ -90,7 +89,7 @@ function setTheme() {
   $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
   $('#theme-label').textContent=dark?'Светлее':'Темнее';
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
-  $('meta[name="theme-color"]').content=dark?'#080b0e':'#e7f1f7';
+  $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';
   storage.set('theme',dark?'dark':'light');wake(.4);
 }
 function coordinates(event,index) {
@@ -145,10 +144,11 @@ document.addEventListener('pointermove',event=>{
 },{passive:true});
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
 $('#reset').addEventListener('click',()=>{
-  audio.unlock();cancelAll();effects.clear();bubbles.forEach(b=>b.reset());
+  audio.unlock();cancelAll();effects.clear();
+  bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
   buttons.forEach((button,i)=>{button.dataset.popped='false';button.removeAttribute('aria-disabled');button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
   $('#caption').textContent='Свежая плёнка. Весь день впереди.';
-  $('#announcement').textContent='Новая плёнка. 9 пузырьков.';wake();
+  $('#announcement').textContent=`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 });
 audio.setEnabled(storage.get('sound','true')==='true');
 function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
