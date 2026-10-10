@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#080b0e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Немного воздуха. Немного удовольствия. Интерактивная пупырчатая плёнка No rush.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%2311181d' stroke='%23d9e8ef' stroke-width='2'/%3E%3Cellipse cx='23' cy='20' rx='11' ry='5' fill='%23fff' transform='rotate(-35 23 20)'/%3E%3C/svg%3E">
+  <title>Bubble · No rush</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="wordmark" href="./" aria-label="No rush, начать заново">no rush</a>
+    <button class="theme-button" id="theme" aria-label="Включить светлую тему" title="Переключить тему">
+      <span class="t-icon-swap" data-state="a" aria-hidden="true">
+        <svg class="t-icon" data-icon="a" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+        <svg class="t-icon" data-icon="b" viewBox="0 0 24 24"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5 8.6 8.6 0 1 0 20.5 14.2Z"/></svg>
+      </span>
+      <span id="theme-label">Светлее</span>
+    </button>
+  </header>
+  <main>
+    <div class="intro">
+      <p class="eyebrow">МАЛЕНЬКАЯ ПАУЗА</p>
+      <h1>Просто полопай.</h1>
+      <p class="instruction" id="instruction">Прижми пузырёк. Подержи. <span>Хлоп.</span></p>
+    </div>
+    <section class="playground" aria-label="Пупырчатая плёнка" aria-describedby="instruction">
+      <div class="sheet" id="sheet" aria-hidden="true"></div>
+      <canvas id="film" aria-hidden="true"></canvas>
+      <div id="targets" class="targets"></div>
+      <canvas id="bursts" aria-hidden="true"></canvas>
+      <p id="render-error" class="render-error" hidden>Не удалось включить графику. Попробуй открыть страницу в Safari или Chrome.</p>
+    </section>
+    <div class="below-film">
+      <span class="tiny-dot" aria-hidden="true"></span>
+      <p id="caption">Никуда не торопимся</p>
+    </div>
+    <div class="controls">
+      <button id="reset" class="reset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"/></svg>Ещё плёнку</button>
+      <button id="sound" class="icon-button" aria-label="Выключить звук" aria-pressed="true" title="Звук">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 4-6 5H2v6h3l6 5Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-muted" d="m16 9 6 6m0-6-6 6"/></svg>
+      </button>
+    </div>
+    <details class="settings">
+      <summary>Настроить под себя <span aria-hidden="true">+</span></summary>
+      <div class="settings-body">
+        <label class="size-label" for="size">Размер пузырька <output id="size-value">≈ 2 см</output></label>
+        <input id="size" type="range" min="64" max="100" value="84" step="2" aria-label="Размер пузырька">
+        <p>Размер на экранах отличается — подстрой под свой палец.</p>
+        <label class="motion-label"><input id="motion" type="checkbox"> Меньше эффектов</label>
+      </div>
+    </details>
+    <p class="sr-only" id="announcement" aria-live="polite" aria-atomic="true"></p>
+  </main>
+  <footer><span>НЕМНОГО ВОЗДУХА. НЕМНОГО УДОВОЛЬСТВИЯ.</span></footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

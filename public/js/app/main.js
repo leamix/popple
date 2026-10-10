@@ -1,0 +1,174 @@
+import { BubbleState } from './physics.js';
+import { FilmRenderer } from './renderer.js';
+import { PopAudio, BurstLayer } from './effects.js';
+
+const $ = selector => document.querySelector(selector);
+const storage = {
+  get(key, fallback) { try { return localStorage.getItem('bubble.'+key) ?? fallback; } catch { return fallback; } },
+  set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }
+};
+const bubbles=Array.from({length:9},(_,i)=>new BubbleState(i));
+const audio=new PopAudio();
+const effects=new BurstLayer($('#bursts'));
+const pointers=new Map();
+const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
+const burstPadding=48;
+let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
+let dark=storage.get('theme','dark')==='dark';
+let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
+let layout=[],renderer,frame=0,lastTime=0,animateUntil=0,renderDirty=true,contextLost=false;
+let light={x:0,y:0}, lightTarget={x:0,y:0};
+const buttons=bubbles.map((bubble,i)=>{
+  const button=document.createElement('button');
+  button.className='bubble-target';button.type='button';button.dataset.index=i;
+  button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);
+  button.setAttribute('aria-keyshortcuts','Space Enter');
+  button.dataset.popped='false';
+  $('#targets').append(button);
+  return button;
+});
+
+function wake(seconds=.9) {
+  renderDirty=true;
+  animateUntil=Math.max(animateUntil,performance.now()/1000+seconds);
+  if(!frame&&!document.hidden&&!contextLost) {lastTime=performance.now()/1000;frame=requestAnimationFrame(tick);}
+}
+function tick(ms) {
+  frame=0;
+  if(document.hidden||contextLost) return;
+  const now=ms/1000,dt=Math.min(.1,Math.max(0,now-lastTime));lastTime=now;
+  let active=false;
+  for(let i=0;i<bubbles.length;i++) {
+    const b=bubbles[i];
+    if(b.step(dt,now)) {
+      const p=layout[i];
+      audio.pop();
+      effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
+      buttons[i].dataset.popped='true';
+      buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул`);
+      buttons[i].setAttribute('aria-disabled','true');
+      const count=bubbles.filter(b=>b.popped).length;
+      $('#announcement').textContent=`Хлоп! ${count} из 9 пузырьков лопнули.`;
+      $('#caption').textContent=count===9?'Вся плёнка твоя. Возьмём ещё?':'Вот и всё. Можно ещё один.';
+      animateUntil=now+1.1;
+      if(navigator.vibrate&&!reduced) navigator.vibrate(12);
+    }
+    active ||= b.active;
+  }
+  const ease=1-Math.exp(-dt*8);
+  light.x+=(lightTarget.x-light.x)*ease;light.y+=(lightTarget.y-light.y)*ease;
+  if(reduced) light={x:0,y:0};
+  if(renderer&&(renderDirty||active||now<animateUntil)) renderer.render(bubbles,layout,dark,now,light);
+  renderDirty=false;
+  const bursting=effects.render(now);
+  if(active||bursting||now<animateUntil) frame=requestAnimationFrame(tick);
+}
+function cancelAll() {
+  pointers.clear();bubbles.forEach(b=>b.release());
+  wake();
+}
+function resize() {
+  cancelAll();effects.clear();
+  const width=Math.min(window.innerWidth-12,diameter*3+108);
+  const pitch=(width-72)/3;
+  const actualDiameter=Math.min(diameter,pitch-8);
+  const origin=(width-pitch*2)/2;
+  const stage=$('.playground');stage.style.width=width+'px';stage.style.height=width+'px';
+  layout=bubbles.map((_,i)=>({x:origin+(i%3)*pitch,y:origin+Math.floor(i/3)*pitch,radius:actualDiameter/2}));
+  for(let i=0;i<buttons.length;i++) {
+    const p=layout[i],button=buttons[i];
+    Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
+  }
+  const dpr=Math.min(devicePixelRatio||1,2.5);
+  renderer?.resize(width,width,dpr);
+  effects.resize(width+burstPadding*2,width+burstPadding*2,dpr);
+  $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
+  wake();
+}
+function setTheme() {
+  document.documentElement.dataset.theme=dark?'dark':'light';
+  $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
+  $('#theme-label').textContent=dark?'Светлее':'Темнее';
+  $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
+  $('meta[name="theme-color"]').content=dark?'#080b0e':'#e7f1f7';
+  storage.set('theme',dark?'dark':'light');wake(.4);
+}
+function coordinates(event,index) {
+  const rect=$('.playground').getBoundingClientRect(),p=layout[index];
+  return {x:(event.clientX-rect.left-p.x)/p.radius,y:(event.clientY-rect.top-p.y)/p.radius};
+}
+buttons.forEach((button,i)=>{
+  button.addEventListener('contextmenu',event=>event.preventDefault());
+  button.addEventListener('pointerdown',event=>{
+    if(event.button!==0||bubbles[i].popped||bubbles[i].active) return;
+    event.preventDefault();audio.unlock();
+    const p=coordinates(event,i);
+    if(Math.hypot(p.x,p.y)>1.08)return;
+    pointers.set(event.pointerId,i);button.setPointerCapture(event.pointerId);
+    bubbles[i].press(p.x,p.y,event.pressure,performance.now()/1000);wake();
+  });
+  button.addEventListener('pointermove',event=>{
+    if(pointers.get(event.pointerId)!==i)return;
+    const p=coordinates(event,i);
+    if(Math.hypot(p.x,p.y)>1.35) {
+      bubbles[i].release();pointers.delete(event.pointerId);wake();return;
+    }
+    bubbles[i].move(p.x,p.y,event.pressure);wake();
+  });
+  const release=event=>{
+    if(pointers.get(event.pointerId)!==i)return;
+    pointers.delete(event.pointerId);bubbles[i].release();wake();
+  };
+  button.addEventListener('pointerup',event=>{audio.unlock();release(event);});
+  button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);
+  button.addEventListener('keydown',event=>{
+    if(![' ','Enter'].includes(event.key))return;
+    event.preventDefault();if(event.repeat)return;
+    audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
+  });
+  button.addEventListener('keyup',event=>{
+    if([' ','Enter'].includes(event.key)){event.preventDefault();bubbles[i].release();wake();}
+  });
+  button.addEventListener('blur',()=>{bubbles[i].release();wake();});
+  // Assistive-technology activation has no physical key/pointer hold.
+  button.addEventListener('click',event=>{
+    if(event.detail===0&&!bubbles[i].active&&!bubbles[i].popped){
+      audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
+    }
+  });
+});
+document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
+document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
+document.addEventListener('pointermove',event=>{
+  if(event.pointerType==='touch'||reduced)return;
+  lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055};wake(.55);
+},{passive:true});
+$('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
+$('#reset').addEventListener('click',()=>{
+  audio.unlock();cancelAll();effects.clear();bubbles.forEach(b=>b.reset());
+  buttons.forEach((button,i)=>{button.dataset.popped='false';button.removeAttribute('aria-disabled');button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
+  $('#caption').textContent='Свежая плёнка. Весь день впереди.';
+  $('#announcement').textContent='Новая плёнка. 9 пузырьков.';wake();
+});
+audio.setEnabled(storage.get('sound','true')==='true');
+function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
+$('#sound').addEventListener('click',()=>{
+  audio.setEnabled(!audio.enabled);if(audio.enabled)audio.unlock();
+  storage.set('sound',String(audio.enabled));updateSound();
+});
+$('#size').value=diameter;
+$('#size').addEventListener('input',event=>{diameter=Number(event.target.value);storage.set('size',diameter);resize();});
+$('#motion').checked=reduced;
+$('#motion').addEventListener('change',event=>{reduced=event.target.checked;storage.set('motion',String(reduced));effects.clear();wake();});
+reducedQuery.addEventListener('change',event=>{reduced=event.matches;$('#motion').checked=reduced;effects.clear();wake();});
+window.addEventListener('resize',resize);
+window.addEventListener('blur',cancelAll);
+document.addEventListener('visibilitychange',()=>{
+  cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else wake();
+});
+$('#film').addEventListener('webglcontextlost',event=>{event.preventDefault();cancelAll();contextLost=true;cancelAnimationFrame(frame);frame=0;});
+$('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;renderer.initialize();resize();});
+try { renderer=new FilmRenderer($('#film')); } catch(error) {
+  console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
+}
+updateSound();setTheme();resize();
