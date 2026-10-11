@@ -97,18 +97,25 @@ vec2 lightCoordinates(vec3 r) {
   vec3 up=cross(l,axis);
   return vec2(atan(dot(r,axis),dot(r,l)),atan(dot(r,up),dot(r,l)))+u_light;
 }
-// A short tapered strip inside the larger reflected window reaches white.
-// Its rounded ends and softly curved edge follow the reflected source rather
-// than painting a highlight onto a fixed point on the bubble.
+// A broad luminous lobe occupies about a quarter of the reflected window.
+// Small contour variations belong to that source; the membrane's curved normals
+// then bend the entire lobe together with the surrounding softer reflection.
 vec2 highlightMasks(vec2 uv, float roughness) {
-  vec2 local=uv-vec2(-.19,.032);
-  float taper=pow(max(0.,1.-sq(local.x/.29)),.65);
-  float across=local.y+.012*sin(local.x*5.);
-  float endFade=1.-smoothstep(.22,.29,abs(local.x));
-  float width=.036*taper;
-  float core=(1.-smoothstep(width*.63,width+.010+roughness*.020,abs(across)))*endFade;
-  // Only the positive-y boundary carries a tiny chromatic fringe.
-  float fringe=exp(-sq((across-width-.009)/(.008+roughness*.018)))*endFade;
+  vec2 local=uv-vec2(-.17,.006);
+  local.y+=.012*sin(local.x*7.-.4)+.004*sin(local.x*16.+.8);
+  vec2 scaled=local/vec2(.44,.125);
+  float angle=angleOf(scaled);
+  float contour=1.+.035*sin(angle*3.+.6)+.020*sin(angle*5.-.4);
+  float distance=length(scaled)/contour;
+  float core=1.-smoothstep(.80,1.05+roughness*.06,distance);
+  // Convert the curved contour's distance back into source-angle space, so
+  // the fringe has similar optical width around this one upper boundary.
+  vec2 direction=scaled/max(length(scaled),.0001);
+  float borderDistance=(distance-1.00)/max(length(direction/vec2(.44,.125)),.0001);
+  float arc=smoothstep(.08,.45,direction.y)*(1.-smoothstep(.80,.98,abs(direction.x)));
+  // Keep this soft coloured seam visible at normal phone size, around one CSS pixel.
+  float fringeWidth=max(.022+roughness*.025,1.5/u_radius);
+  float fringe=exp(-sq(borderDistance/fringeWidth))*arc;
   return vec2(core,fringe);
 }
 vec3 environment(vec3 r, float roughness) {
@@ -126,13 +133,14 @@ vec3 environment(vec3 r, float roughness) {
   env+=vec3(.94,.98,1.)*(key*.8+inner*2.4)*split;
   env+=vec3(1.,.95,.85)*rim*1.6;
   env+=vec3(.65,.83,1.)*bottom*.5;
-  // Daylight comes from one white source. A small bloom surrounds the sharp
-  // reflected core; it does not soften the whole dome into a milky sphere.
+  // Preserve tonal detail in the larger daylight reflection. The brightest
+  // lobe is added after tone mapping; the whole window should not clip white.
   float core=box(uv,vec2(.69,.145),.012+roughness*.12);
   float bloom=box(uv,vec2(.71,.16),.075+roughness*.17);
   float glint=box(suv+u_light+vec2(.01,.10),vec2(.045,.16),.014+roughness*.11);
   float glintBloom=box(suv+u_light+vec2(.01,.10),vec2(.052,.17),.065+roughness*.14);
-  vec3 daylight=vec3(core*4.8+bloom*.17+glint*1.65+glintBloom*.085+broad*.025);
+  float sourceGradient=.70+.30*exp(-sq((uv.x+.20)/.58)-sq(uv.y/.26));
+  vec3 daylight=vec3(core*1.35*sourceGradient+bloom*.16+glint*1.65+glintBloom*.085+broad*.025);
   return mix(daylight,env,u_dark);
 }
 float sheetMask(vec2 pixel) {
@@ -203,14 +211,14 @@ void main() {
   spec=1.-exp(-max(vec3(0.),spec)*1.4);
   vec2 sourceUV=lightCoordinates(reflected);
   vec2 highlight=highlightMasks(sourceUV,c*mix(.11,.18,u_dark));
-  spec=mix(spec,vec3(.997),highlight.x*body);
-  // A very weak thin-film-like optical approximation: wavelength phase varies
+  spec=mix(spec,vec3(1.),highlight.x*body);
+  // A restrained thin-film-like optical approximation: wavelength phase varies
   // with viewing angle and local film height. Plastic is thicker than soap;
   // confining this hint to one bright border avoids an all-over rainbow skin.
   float opticalPath=930.+sourceUV.x*510.+normal.z*115.+h*48.;
   vec3 spectrum=.5+.5*cos(2.*PI*opticalPath/vec3(650.,510.,440.));
   spectrum-=vec3((spectrum.r+spectrum.g+spectrum.b)/3.);
-  spec=clamp(spec+spectrum*highlight.y*body*.032,0.,1.);
+  spec=clamp(spec+spectrum*highlight.y*body*.14,0.,1.);
   float specMax=max(spec.r,max(spec.g,spec.b));
   // Keep clear film colourless. One faint contact contour describes its seal;
   // stacked dark/white studio strips made the lower-right edge look moulded.
