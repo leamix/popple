@@ -1,6 +1,7 @@
 const RADIANS = Math.PI / 180;
 const DATA_TIMEOUT = 5000;
 export const MAX_LIGHT_SHIFT = .17;
+export const MAX_REFLECTION_ANGLE = .95;
 
 export function angleDifference(angle, reference) {
   const difference = angle % 360 - reference % 360;
@@ -17,22 +18,32 @@ export function readOrientation(event) {
 
 export function orientationLight(event, baseline, screenAngle = 0) {
   const sample = readOrientation(event), reference = readOrientation(baseline);
-  if (!sample || !reference) return { x: 0, y: 0 };
+  if (!sample || !reference) return { x: 0, y: 0, angle: 0 };
   const yaw = sample.alpha === null || reference.alpha === null
     ? 0 : angleDifference(sample.alpha, reference.alpha) * RADIANS;
+  const roll = angleDifference(sample.gamma, reference.gamma);
+  const pitch = angleDifference(sample.beta, reference.beta);
   // A small movement of a broad light source, not an object sliding on the film.
   // Tilt is softened before the radial bound; yaw gently turns the same reflection.
-  const dx = .14 * Math.tanh(angleDifference(sample.gamma, reference.gamma) / 35)
+  const dx = .14 * Math.tanh(roll / 35)
     - .048 * Math.sin(yaw);
-  const dy = -.124 * Math.tanh(angleDifference(sample.beta, reference.beta) / 35)
+  const dy = -.124 * Math.tanh(pitch / 35)
     + .024 * (1 - Math.cos(yaw));
   const angle = (Number.isFinite(screenAngle) ? screenAngle : 0) * RADIANS;
+  const cosine = Math.cos(angle), sine = Math.sin(angle);
   // Rotate device axes into the currently displayed screen axes.
-  const x = dx * Math.cos(angle) + dy * Math.sin(angle);
-  const y = -dx * Math.sin(angle) + dy * Math.cos(angle);
+  const x = dx * cosine + dy * sine;
+  const y = -dx * sine + dy * cosine;
   const distance = Math.hypot(x, y);
   const scale = distance ? MAX_LIGHT_SHIFT * Math.tanh(distance / MAX_LIGHT_SHIFT) / distance : 1;
-  return { x: x * scale, y: y * scale };
+  // Orbit moves reflection placement around the bubble, independently of the
+  // light source's subtle x/y shift. Roll leads, pitch adds gentler travel.
+  const screenRoll = roll * cosine + pitch * sine;
+  const screenPitch = -roll * sine + pitch * cosine;
+  const orbitAngle = MAX_REFLECTION_ANGLE * Math.tanh(
+    .95 * screenRoll / 50 + .35 * screenPitch / 50 + .65 * Math.sin(yaw)
+  );
+  return { x: x * scale, y: y * scale, angle: orbitAngle };
 }
 
 /** Device-only illumination. Call enable({ userGesture: true }) from a settings click. */
@@ -47,7 +58,7 @@ export class DeviceLighting {
     this.active = false;
     this.hasData = false;
     this.status = 'idle';
-    this.vector = { x: 0, y: 0 };
+    this.vector = { x: 0, y: 0, angle: 0 };
     this.baseline = null;
     this.permissionGranted = false;
     this.permissionDenied = false;
@@ -221,9 +232,11 @@ export class DeviceLighting {
     const easing = 1 - Math.exp(-dt * 12);
     const next = {
       x: this.vector.x + (target.x - this.vector.x) * easing,
-      y: this.vector.y + (target.y - this.vector.y) * easing
+      y: this.vector.y + (target.y - this.vector.y) * easing,
+      angle: this.vector.angle + (target.angle - this.vector.angle) * easing
     };
-    if (Math.hypot(next.x - this.vector.x, next.y - this.vector.y) > .0001) {
+    if (Math.hypot(next.x - this.vector.x, next.y - this.vector.y) > .0001
+      || Math.abs(next.angle - this.vector.angle) > .0001) {
       this.vector = next;
       this.onChange({ ...next });
     }
@@ -239,7 +252,7 @@ export class DeviceLighting {
     this.hasData = false;
     this.lastTime = null;
     this.lastDataTime = null;
-    this.vector = { x: 0, y: 0 };
+    this.vector = { x: 0, y: 0, angle: 0 };
     this.onChange({ ...this.vector });
   }
 

@@ -56,7 +56,7 @@ test('null or nonfinite tilt is unavailable, while missing yaw permits tilt', ()
 });
 
 test('orientation maps neutral, tilt and yaw to a small bounded light vector', () => {
-  assert.deepEqual(orientationLight(baseline, baseline), { x: 0, y: 0 });
+  assert.deepEqual(orientationLight(baseline, baseline), { x: 0, y: 0, angle: 0 });
   assert.ok(orientationLight({ ...baseline, gamma: 25 }, baseline).x > 0);
   assert.ok(orientationLight({ ...baseline, beta: 25 }, baseline).y < 0);
   assert.ok(Math.abs(orientationLight({ ...baseline, alpha: 45 }, baseline).x) > .005);
@@ -77,8 +77,8 @@ test('yaw wraps through north smoothly and invalid input never introduces NaN', 
   const crossing = orientationLight({ ...baseline, alpha: 1 }, { ...baseline, alpha: 359 });
   const equivalent = orientationLight({ ...baseline, alpha: 2 }, baseline);
   close(crossing.x, equivalent.x); close(crossing.y, equivalent.y);
-  assert.deepEqual(orientationLight({ ...baseline, beta: null }, baseline), { x: 0, y: 0 });
-  assert.deepEqual(orientationLight(baseline, null), { x: 0, y: 0 });
+  assert.deepEqual(orientationLight({ ...baseline, beta: null }, baseline), { x: 0, y: 0, angle: 0 });
+  assert.deepEqual(orientationLight(baseline, null), { x: 0, y: 0, angle: 0 });
   const extremeYaw = orientationLight({ ...baseline, alpha: 1e308 }, { ...baseline, alpha: -1e308 });
   assert.ok(Number.isFinite(extremeYaw.x) && Number.isFinite(extremeYaw.y));
   assert.ok(Math.hypot(extremeYaw.x, extremeYaw.y) <= MAX_LIGHT_SHIFT);
@@ -92,6 +92,52 @@ test('landscape maps device axes to displayed axes without changing displacement
   close(right.x, portrait.y); close(right.y, -portrait.x);
   close(left.x, -portrait.y); close(left.y, portrait.x);
   close(Math.hypot(portrait.x, portrait.y), Math.hypot(right.x, right.y));
+});
+
+test('ordinary tilt and yaw move reflection angular placement visibly around the bubble', () => {
+  const roll = orientationLight({ ...baseline, gamma: 25 }, baseline);
+  const yaw = orientationLight({ ...baseline, alpha: 25 }, baseline);
+  const degrees = radians => radians * 180 / Math.PI;
+  assert.ok(degrees(roll.angle) >= 20 && degrees(roll.angle) <= 25);
+  assert.ok(degrees(yaw.angle) >= 13 && degrees(yaw.angle) <= 17);
+  assert.ok(Math.hypot(roll.x, roll.y) <= MAX_LIGHT_SHIFT);
+});
+
+test('reflection orbit is screen-relative, smoothly bounded, and continuous through yaw wrap', () => {
+  const portraitRoll = orientationLight({ ...baseline, gamma: 25 }, baseline);
+  const landscapeRoll = orientationLight({ ...baseline, beta: 25 }, baseline, 90);
+  close(portraitRoll.angle, landscapeRoll.angle);
+  close(orientationLight({ ...baseline, gamma: -25 }, baseline).angle, -portraitRoll.angle);
+  const crossing = orientationLight({ ...baseline, alpha: 1 }, { ...baseline, alpha: 359 });
+  const equivalent = orientationLight({ ...baseline, alpha: 2 }, baseline);
+  close(crossing.angle, equivalent.angle);
+  const beforeHalfTurn = orientationLight({ ...baseline, alpha: 179 }, baseline);
+  const afterHalfTurn = orientationLight({ ...baseline, alpha: 181 }, baseline);
+  assert.ok(Math.abs(beforeHalfTurn.angle - afterHalfTurn.angle) < .025);
+  for (let beta = -180; beta <= 180; beta += 30) for (let gamma = -90; gamma <= 90; gamma += 15) {
+    for (let alpha = 0; alpha < 360; alpha += 30) {
+      const vector = orientationLight({ alpha, beta, gamma }, baseline);
+      assert.ok(Number.isFinite(vector.angle));
+      assert.ok(Math.abs(vector.angle) <= .95);
+    }
+  }
+  assert.ok(orientationLight({ alpha: 90, beta: 160, gamma: 90 }, baseline).angle > .9);
+});
+
+test('sensor helper smooths orbit independently and resets its angle for reduced motion', async () => {
+  const env = environment(), changes = [];
+  const light = new DeviceLighting({ environment: env, onChange: vector => changes.push(vector) });
+  await light.enable(); env.sample(0, 0); env.sample(0, 25);
+  const target = orientationLight({ ...baseline, gamma: 25 }, baseline);
+  assert.ok(light.vector.angle > 0 && light.vector.angle < target.angle);
+  light.setReduced(true); assert.equal(light.vector.angle, 0);
+  light.setReduced(false); env.sample(0, 0); const changeCount = changes.length;
+  // A counter-tilt cancels the light's source displacement while twist still
+  // moves its angular placement. Such an event must still trigger rendering.
+  env.sample(.635, 5.106, 25);
+  assert.ok(Math.hypot(light.vector.x, light.vector.y) < .0001);
+  assert.ok(light.vector.angle > .03); assert.ok(changes.length > changeCount);
+  light.disable(); assert.equal(light.vector.angle, 0); light.destroy();
 });
 
 test('permission never prompts on startup, resume or false activation', async () => {
@@ -115,7 +161,7 @@ test('explicit settings click requests only relative orientation and waits for r
   env.sample(null, null); assert.equal(light.status, 'listening');
   env.sample(40, 15, null); assert.equal(light.status, 'granted');
   assert.equal(light.hasData, true); assert.equal(env.timerCount(), 1);
-  assert.deepEqual(light.vector, { x: 0, y: 0 });
+  assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   env.sample(40, 25, null); assert.ok(light.vector.x > 0);
   assert.ok(light.vector.x < orientationLight({ alpha: null, beta: 40, gamma: 25 }, { alpha: null, beta: 40, gamma: 15 }).x);
   assert.ok(statuses.includes('pending') && statuses.includes('granted')); light.destroy();
@@ -147,7 +193,7 @@ test('insecure, missing API and reduced motion never request permission', async 
 test('lack of events remains static with no-data status; late data is still accepted', async () => {
   const env = environment(), light = new DeviceLighting({ environment: env });
   await light.enable(); env.expire();
-  assert.equal(light.status, 'no-data'); assert.deepEqual(light.vector, { x: 0, y: 0 });
+  assert.equal(light.status, 'no-data'); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   env.sample(0, 0); assert.equal(light.status, 'granted'); light.destroy();
 });
 
@@ -156,16 +202,16 @@ test('screen rotation recenters before measuring the new screen', async () => {
   await light.enable(); env.sample(0, 0); env.sample(0, 20);
   assert.ok(light.vector.x > 0);
   env.screen.orientation.angle = 90; env.screen.orientation.dispatch('change');
-  assert.deepEqual(light.vector, { x: 0, y: 0 }); assert.equal(light.baseline, null);
+  assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 }); assert.equal(light.baseline, null);
   assert.equal(light.status, 'listening');
-  env.sample(0, 20); assert.deepEqual(light.vector, { x: 0, y: 0 });
+  env.sample(0, 20); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   env.sample(0, 30); assert.ok(light.vector.y < 0); light.destroy();
 });
 
 test('missing yaw calibrates independently when it becomes available', async () => {
   const env = environment(), light = new DeviceLighting({ environment: env });
   await light.enable(); env.sample(0, 0, null); env.sample(0, 0, 123);
-  assert.deepEqual(light.vector, { x: 0, y: 0 });
+  assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   env.sample(0, 0, 150); assert.ok(light.vector.x < 0); light.destroy();
 });
 
@@ -179,9 +225,9 @@ test('reduced motion, hidden page, blur and context loss recenter and stop senso
     [() => light.setSuspended(true), () => light.setSuspended(false), 'suspended']
   ]) {
     pause(); assert.equal(light.status, status); assert.equal(env.count('deviceorientation'), 0);
-    env.sample(40, 45); assert.deepEqual(light.vector, { x: 0, y: 0 });
+    env.sample(40, 45); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
     resume(); assert.equal(env.count('deviceorientation'), 1);
-    env.sample(40, 45); assert.deepEqual(light.vector, { x: 0, y: 0 });
+    env.sample(40, 45); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
     env.sample(40, 55); assert.ok(light.vector.x > 0);
   }
   light.destroy();
@@ -205,7 +251,7 @@ test('permission is reused on re-enable but calibration never reuses a stale pos
   const env = environment({ permission: 'granted' }), light = new DeviceLighting({ environment: env });
   await light.enable({ userGesture: true }); env.sample(0, 0); env.sample(0, 20); light.disable();
   await light.enable(); assert.equal(env.permissionCalls(), 1);
-  env.sample(30, 30); assert.deepEqual(light.vector, { x: 0, y: 0 }); light.destroy();
+  env.sample(30, 30); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 }); light.destroy();
 });
 
 test('turning off reduced motion starts an opted-in device without a permission API', async () => {
@@ -236,7 +282,7 @@ test('startup observation never invents permission when browser events are block
   assert.equal(light.enabled, true); assert.equal(light.active, true);
   assert.equal(light.status, 'permission-required'); assert.equal(light.permissionGranted, false);
   assert.equal(light.hasData, false); assert.equal(env.permissionCalls(), 0);
-  assert.deepEqual(light.vector, { x: 0, y: 0 });
+  assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   await light.enable({ userGesture: true }); assert.equal(env.permissionCalls(), 1);
   assert.equal(light.status, 'listening'); env.sample(null, 0); env.expire();
   assert.equal(light.status, 'no-data'); assert.equal(light.hasData, false); light.destroy();
@@ -262,7 +308,7 @@ test('denying a native prompt after blur restores the denial explanation without
   assert.equal(light.status, 'denied'); assert.equal(light.permissionDenied, true);
   assert.equal(light.pending, false); assert.equal(light.interrupted, false);
   assert.equal(env.count('deviceorientation'), 0); assert.equal(env.permissionCalls(), 1);
-  env.sample(0, 30); assert.deepEqual(light.vector, { x: 0, y: 0 }); light.destroy();
+  env.sample(0, 30); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 }); light.destroy();
 });
 
 test('denial completing in a hidden or unfocused page preserves suspension until a real return', async () => {
@@ -319,7 +365,7 @@ test('trusted interaction cannot bypass hidden, reduced, suspended or insecure r
     [() => { env.isSecureContext = false; }, () => { env.isSecureContext = true; }]
   ]) {
     block(); env.document.dispatch('pointerdown', { isTrusted: true });
-    assert.equal(env.count('deviceorientation'), 0); assert.deepEqual(light.vector, { x: 0, y: 0 });
+    assert.equal(env.count('deviceorientation'), 0); assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
     unblock(); env.dispatch('blur');
   }
   light.destroy();
@@ -342,7 +388,7 @@ test('loss of sensor data clears stale lighting and can recover without another 
   await light.enable({ userGesture: true }); env.sample(0, 0); env.sample(0, 25);
   assert.equal(light.hasData, true); assert.ok(light.vector.x > 0);
   env.expire(); assert.equal(light.status, 'no-data'); assert.equal(light.hasData, false);
-  assert.deepEqual(light.vector, { x: 0, y: 0 });
+  assert.deepEqual(light.vector, { x: 0, y: 0, angle: 0 });
   env.sample(0, 25); assert.equal(light.status, 'granted'); env.sample(0, 35);
   assert.ok(light.vector.x > 0); assert.equal(env.permissionCalls(), 1); light.destroy();
 });

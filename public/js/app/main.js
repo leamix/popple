@@ -22,7 +22,7 @@ let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
 let dark=storage.get('theme','dark')==='dark';
 let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
 let layout=[],renderer,frame=0,lastTime=0,animateUntil=0,renderDirty=true,contextLost=false;
-let light={x:0,y:0}, lightTarget={x:0,y:0};
+let light={x:0,y:0,angle:0}, lightTarget={x:0,y:0,angle:0};
 let tiltWanted=storage.get('tilt','true')==='true',tiltStatus='idle';
 const deviceLighting=new DeviceLighting({
   reduced,
@@ -67,7 +67,8 @@ function tick(ms) {
   }
   const ease=1-Math.exp(-dt*8);
   light.x+=(lightTarget.x-light.x)*ease;light.y+=(lightTarget.y-light.y)*ease;
-  if(reduced) light={x:0,y:0};
+  light.angle+=(lightTarget.angle-light.angle)*ease;
+  if(reduced) light={x:0,y:0,angle:0};
   if(renderer&&(renderDirty||active||now<animateUntil)) renderer.render(bubbles,layout,dark,now,light);
   renderDirty=false;
   const bursting=effects.render(now);
@@ -164,7 +165,7 @@ document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
 document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
 document.addEventListener('pointermove',event=>{
   if(event.pointerType==='touch'||reduced||deviceLighting.hasData)return;
-  lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055};wake(.55);
+  lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055,angle:0};wake(.55);
 },{passive:true});
 document.addEventListener('selectstart',event=>event.preventDefault());
 document.addEventListener('dragstart',event=>event.preventDefault());
@@ -249,7 +250,7 @@ $('#tilt-permission').addEventListener('click',()=>deviceLighting.enable({userGe
 $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
-  light=lightTarget={x:0,y:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
+  light=lightTarget={x:0,y:0,angle:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));

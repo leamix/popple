@@ -53,7 +53,10 @@ report.browser.playwright = JSON.parse(await readFile(path.join(playwrightPath, 
 const physics = await readFile(path.join(root, 'physics.js'), 'utf8');
 const instrumentedPhysics = physics.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
 const rendererSource = await readFile(path.join(root, 'renderer.js'), 'utf8');
-const instrumentedRenderer = rendererSource.replace('render(bubbles,layout,dark,time,light) {', 'render(bubbles,layout,dark,time,light) { globalThis.__lastLight={...light};');
+const instrumentedRenderer = rendererSource.replace('render(bubbles,layout,dark,time,light) {', `render(bubbles,layout,dark,time,light) {
+    globalThis.__lastLight={...light}; globalThis.__filmRenderer=this;
+    globalThis.__filmLayout=layout; globalThis.__filmDark=dark; globalThis.__filmTime=time;`);
+assert.notEqual(instrumentedRenderer,rendererSource,'Renderer test instrumentation must match the current render method.');
 const activeContexts = [];
 
 async function context(options = {}) {
@@ -136,6 +139,72 @@ async function inspectStaggeredLayout(page) {
     assert.ok(bubble.x + bubble.radius * 1.14 <= viewportWidth + 0.5);
   }
   return { rowCounts: rows.map(row => row.length), pitch, minimumVisibleGapPx: minimumGap, viewportWidth };
+}
+
+async function captureFilmReflections(page, label, referenceLabel = null) {
+  // WebGL clears its drawing buffer after presentation. Render once and read
+  // immediately in the same browser task; production frames incur no readback.
+  return page.evaluate(({ label, referenceLabel }) => {
+    const renderer=window.__filmRenderer,layout=window.__filmLayout;
+    renderer.render(window.__bubbleStates,layout,window.__filmDark,window.__filmTime,window.__lastLight);
+    const gl=renderer.gl,width=renderer.canvas.width,height=renderer.canvas.height,dpr=renderer.dpr;
+    const pixels=new Uint8Array(width*height*4);
+    gl.readPixels(0,0,width,height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+    if(gl.getError()!==gl.NO_ERROR) throw new Error('Reflection snapshot WebGL readback failed.');
+    const snapshots=window.__filmPixelSnapshots??=new Map();
+    const reference=referenceLabel?snapshots.get(referenceLabel):null;
+    if(referenceLabel&&(!reference||reference.width!==width||reference.height!==height)) throw new Error('Reflection snapshots must use the same canvas geometry.');
+    const pockets=layout.map((p,index)=>{
+      let whitePixels=0,sumX=0,sumY=0,surfacePixels=0,changedPixels=0,totalDifference=0;
+      const reach=p.radius*.9;
+      for(let y=Math.max(0,Math.floor((p.y-reach)*dpr));y<Math.min(height,Math.ceil((p.y+reach)*dpr));y++) {
+        for(let x=Math.max(0,Math.floor((p.x-reach)*dpr));x<Math.min(width,Math.ceil((p.x+reach)*dpr));x++) {
+          const cssX=(x+.5)/dpr,cssY=(y+.5)/dpr;
+          if(Math.hypot(cssX-p.x,cssY-p.y)>reach) continue;
+          const offset=((height-1-y)*width+x)*4;
+          surfacePixels++;
+          // The broad white source core clips near white. The shoulder and lip
+          // sit outside this crop, so their thin arcs cannot dominate its centre.
+          if(Math.min(pixels[offset],pixels[offset+1],pixels[offset+2],pixels[offset+3])>=245) {
+            whitePixels++;sumX+=cssX;sumY+=cssY;
+          }
+          if(reference) {
+            const difference=(Math.abs(pixels[offset]-reference.pixels[offset])+Math.abs(pixels[offset+1]-reference.pixels[offset+1])+Math.abs(pixels[offset+2]-reference.pixels[offset+2]))/3;
+            totalDifference+=difference;if(difference>5) changedPixels++;
+          }
+        }
+      }
+      const b=window.__bubbleStates[index];
+      const highlight=whitePixels?{x:sumX/whitePixels-p.x,y:sumY/whitePixels-p.y}:null;
+      return {index,popped:b.popped,whitePixels,highlight,surfacePixels,
+        ...(reference?{changedFraction:changedPixels/surfacePixels,meanDifference:totalDifference/surfacePixels}:{}),
+        state:{seed:b.seed,popped:b.popped,popX:b.popX,popY:b.popY,x:b.x,y:b.y,compression:b.compression,bulge:b.bulge,collapse:b.collapse}};
+    });
+    snapshots.set(label,{width,height,pixels});
+    const geometry=[...document.querySelectorAll('.bubble-target')].map(button=>{
+      const rect=button.getBoundingClientRect();return {x:rect.x,y:rect.y,width:rect.width,height:rect.height};
+    });
+    return {light:{...window.__lastLight},width,height,dpr,geometry,pockets};
+  },{label,referenceLabel});
+}
+
+function assertReflectionOrbit(neutral, tilted) {
+  assert.deepEqual(tilted.geometry,neutral.geometry,'Sensor lighting must preserve every pocket hit area.');
+  const movements=neutral.pockets.map((before,index)=>{
+    const after=tilted.pockets[index];
+    for(const key of ['seed','popped','popX','popY']) assert.equal(after.state[key],before.state[key],`Lighting must preserve pocket ${index+1} ${key}.`);
+    for(const key of ['x','y','compression','bulge','collapse']) assert.ok(Math.abs(after.state[key]-before.state[key])<.002,`Lighting must preserve pocket ${index+1} ${key}.`);
+    assert.ok(after.changedFraction>.06&&after.meanDifference>1.5,`Pocket ${index+1} must visibly change its reflected light, including collapsed film.`);
+    if(before.popped) return {index,popped:true,changedFraction:after.changedFraction,meanDifference:after.meanDifference};
+    assert.ok(before.whitePixels>20&&after.whitePixels>20,`Pocket ${index+1} must retain a measurable broad white core.`);
+    const displacementPx=Math.hypot(after.highlight.x-before.highlight.x,after.highlight.y-before.highlight.y);
+    const a=Math.atan2(before.highlight.y,before.highlight.x),b=Math.atan2(after.highlight.y,after.highlight.x);
+    const orbitDegrees=Math.abs(Math.atan2(Math.sin(b-a),Math.cos(b-a)))*180/Math.PI;
+    assert.ok(displacementPx>=7||orbitDegrees>=15,`Pocket ${index+1} reflection barely moved: ${displacementPx.toFixed(2)}px / ${orbitDegrees.toFixed(2)}°.`);
+    return {index,popped:false,displacementPx,orbitDegrees,changedFraction:after.changedFraction};
+  });
+  assert.ok(movements.some(p=>p.popped)&&movements.some(p=>!p.popped),'The rendered regression must exercise both intact and popped film.');
+  return movements;
 }
 
 try {
@@ -401,8 +470,9 @@ try {
     await tilt.locator('#tilt-permission').click();
     assert.equal(await tilt.evaluate(()=>__permissionCalls),1);await tilt.locator('#settings-close').click();
     await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:355,beta:40,gamma:0});window.dispatchEvent(event);});
-    await tilt.waitForTimeout(150);
+    await tilt.waitForTimeout(400);
     const initial=await tilt.evaluate(()=>({...__lastLight}));
+    const neutral=await captureFilmReflections(tilt,'sensor-neutral');
     for(let i=0;i<12;i++){
       await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:25,beta:72,gamma:28});window.dispatchEvent(event);});
       await tilt.waitForTimeout(35);
@@ -410,15 +480,18 @@ try {
     await tilt.waitForTimeout(450);
     const shifted=await tilt.evaluate(()=>({...__lastLight}));
     assert.ok(Math.hypot(shifted.x,shifted.y)>.03&&Math.hypot(shifted.x,shifted.y)<=.17);
+    assert.ok(Math.abs(shifted.angle)>.25&&Math.abs(shifted.angle)<=.95,'An ordinary phone tilt must noticeably rotate the reflected source.');
     assert.ok(Math.hypot(shifted.x-initial.x,shifted.y-initial.y)>.03);assert.equal(await count(tilt),1);
+    const tilted=await captureFilmReflections(tilt,'sensor-tilted','sensor-neutral');
+    const reflectionMovements=assertReflectionOrbit(neutral,tilted);
     await screenshot(tilt,'mobile-tilt-dark.png');await tilt.locator('#theme').click();await tilt.waitForTimeout(150);await screenshot(tilt,'mobile-tilt-light.png');
     await tilt.locator('#settings-open').click();await tilt.locator('#motion').check();await tilt.waitForTimeout(120);
-    assert.deepEqual(await tilt.evaluate(()=>({...__lastLight})),{x:0,y:0});
+    assert.deepEqual(await tilt.evaluate(()=>({...__lastLight})),{x:0,y:0,angle:0});
     assert.equal(await tilt.locator('#tilt').isChecked(),true);
     assert.equal(await tilt.locator('#tilt').isDisabled(),false);
     await tilt.locator('#motion').uncheck();
     await tilt.locator('#settings-close').click();
-    return {initial,shifted,permissionCalls:1};
+    return {initial,shifted,permissionCalls:1,reflectionMovements};
   });
   await check('tilt switch preserves both choices on reload and reuses granted sensor events without a prompt',async()=>{
     await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length===14);
@@ -435,6 +508,7 @@ try {
     }
     await tilt.waitForTimeout(350);
     assert.ok(await tilt.evaluate(()=>Math.hypot(__lastLight.x,__lastLight.y)>.035));
+    assert.ok(await tilt.evaluate(()=>Math.abs(__lastLight.angle)>.25&&Math.abs(__lastLight.angle)<=.95),'Reloaded sensor events must still orbit the reflections.');
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
     await tilt.locator('#tilt').uncheck();
     assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');

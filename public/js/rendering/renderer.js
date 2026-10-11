@@ -10,7 +10,7 @@ void main() { v_uv = a_position; gl_Position = vec4(a_position,0.,1.); }
 const fragment = `
 precision highp float;
 varying vec2 v_uv;
-uniform float u_seed, u_compression, u_collapse, u_dark, u_time, u_bulge, u_sheet;
+uniform float u_seed, u_compression, u_collapse, u_dark, u_time, u_bulge, u_sheet, u_light_angle;
 uniform vec2 u_touch, u_light, u_resolution, u_origin;
 uniform float u_radius;
 uniform vec3 u_sites[${BUBBLE_COUNT}];
@@ -19,6 +19,10 @@ uniform float u_air;
 const float PI = 3.14159265359;
 float sq(float x) { return x*x; }
 float angleOf(vec2 v) { return dot(v,v)<.00000001?0.:atan(v.y,v.x); }
+vec2 turn(vec2 v, float angle) {
+  float c=cos(angle), s=sin(angle);
+  return vec2(c*v.x-s*v.y,s*v.x+c*v.y);
+}
 float hash(vec2 p) { return fract(sin(dot(p,vec2(127.1,311.7))+u_seed*81.17)*43758.5453); }
 float noise(vec2 p) {
   vec2 i=floor(p), f=fract(p); f=f*f*(3.-2.*f);
@@ -154,6 +158,8 @@ float sheetMask(vec2 pixel) {
 void drawSheet() {
   vec2 pixel=(v_uv*vec2(.5,-.5)+.5)*u_resolution;
   vec2 p=pixel/min(u_resolution.x,u_resolution.y);
+  vec2 center=u_resolution*.5/min(u_resolution.x,u_resolution.y);
+  p=turn(p-center,u_light_angle*.45)+center;
   // Uneven, stretched film catches a soft window reflection only where its
   // shallow ripples turn toward the light. No repeated grid or all-over haze.
   float wave=p.x*.72+p.y+.030*sin(p.x*12.+p.y*5.)+.017*sin(p.y*19.-p.x*8.);
@@ -183,25 +189,28 @@ void main() {
   float dy=(heightAt(p+vec2(0.,eps))-heightAt(p-vec2(0.,eps)))/(2.*eps);
   vec3 normal=normalize(vec3(-dx,-dy,1.));
   vec3 reflected=reflect(vec3(0.,0.,-1.),normal);
+  // Rotate the illumination frame, including every studio source. Surface
+  // normals stay in place, so intact domes orbit while slack folds relight.
+  reflected.xy=turn(reflected.xy,-u_light_angle);
   float fresnel=.047+.953*pow(1.-max(normal.z,0.),4.5);
   float body=1.-smoothstep(.993,1.012,r);
   float rim=exp(-sq((r-1.027)/.012));
   float outerRim=exp(-sq((r-1.085)/.0065));
   float shadow=exp(-sq((length(p+vec2(-.012,.025))-1.036)/.020));
   vec3 bg=mix(vec3(.78,.85,.91),vec3(.047,.065,.078),u_dark);
-  float shade=dot(normal,normalize(vec3(-.6,.75,1.)));
+  float shade=dot(normal,normalize(vec3(turn(vec2(-.6,.75),u_light_angle),1.)));
   vec3 env=environment(reflected,c*mix(.11,.18,u_dark));
   float reflection=(.38+fresnel*.65)*mix(1.,.63,c);
   vec3 spec=env*reflection*body;
   // Bright daylight reflections with a crisp core, without filling the clear
   // body with white. The dark theme keeps its original lighting response.
   spec*=mix(1.9,1.,u_dark);
-  float lipLight=.45+.35*sin(angleOf(q)-.3)+.20*sin(angleOf(q)*9.+u_seed);
-  float litEdge=pow(max(0.,dot(direction,normalize(vec2(-.6,.8)))),3.);
+  float lipLight=.45+.35*sin(angleOf(q)-u_light_angle-.3)+.20*sin(angleOf(q)*9.+u_seed);
+  float litEdge=pow(max(0.,dot(direction,normalize(turn(vec2(-.6,.8),u_light_angle)))),3.);
   spec+=mix(vec3(1.),vec3(.88,.94,1.),u_dark)*rim*lipLight*mix(.15+.80*litEdge,1.25,u_dark)*(1.-c*.3);
   spec+=vec3(.84,.93,1.)*outerRim*mix(.035,.32,u_dark)*(1.-c*.35);
   float shoulder=exp(-sq((r-.958)/.022))*body;
-  float shoulderLight=pow(max(0.,dot(normalize(vec2(-.7,.8)),direction)),5.);
+  float shoulderLight=pow(max(0.,dot(normalize(turn(vec2(-.7,.8),u_light_angle)),direction)),5.);
   spec+=vec3(.84,.94,1.)*shoulder*(.06+.30*shoulderLight)*(1.-c*.75)*mix(.22,1.,u_dark);
   spec+=vec3(.50,.57,.61)*pow(fresnel,1.4)*body*.10*u_dark;
   float grain=(noise(p*220.)-.5)*.010;
@@ -232,7 +241,7 @@ void main() {
   vec3 premul=spec+bg*coat*(1.-specMax)*transmissionLight;
   // A little light spills through each curved pocket onto the connected film.
   // Its position/strength vary with the pocket, and relax as the pocket vents.
-  vec2 spillDirection=normalize(vec2(.46+u_seed*.28,-.88));
+  vec2 spillDirection=normalize(turn(vec2(.46+u_seed*.28,-.88),u_light_angle));
   float along=dot(p,spillDirection), across=dot(p,vec2(-spillDirection.y,spillDirection.x));
   float bend=along-1.15+.30*across*across+u_light.y*.35;
   float spill=exp(-sq(bend/.014))*exp(-sq((across-(u_seed-.5)*.45)/.32));
@@ -269,7 +278,7 @@ export class FilmRenderer {
     gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
     const a=gl.getAttribLocation(this.program,'a_position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
     this.uniforms={};
-    for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','air','dent','sheet','resolution','origin','radius']) this.uniforms[name]=gl.getUniformLocation(this.program,'u_'+name);
+    for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','sheet','resolution','origin','radius']) this.uniforms[name]=gl.getUniformLocation(this.program,'u_'+name);
     for(const name of ['folds','foldProfile','pockets']) this.uniforms[name]=gl.getUniformLocation(this.program,'u_'+name+'[0]');
     this.uniforms.sites=gl.getUniformLocation(this.program,'u_sites[0]');
     this.sites=new Float32Array(BUBBLE_COUNT*3);
@@ -286,6 +295,7 @@ export class FilmRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.program);
     gl.uniform1f(u.dark,dark?1:0);gl.uniform1f(u.time,time);
     gl.uniform2f(u.light,light.x,light.y);
+    gl.uniform1f(u.light_angle,Number.isFinite(light.angle)?light.angle:0);
     gl.uniform2f(u.resolution,this.width,this.height);
     for(let i=0;i<layout.length;i++) this.sites.set([layout[i].x,layout[i].y,layout[i].radius],i*3);
     gl.uniform3fv(u.sites,this.sites);
