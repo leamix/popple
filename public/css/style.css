@@ -39,6 +39,8 @@ html[data-theme="light"] .sheet::after { opacity: 0; }
 #film { pointer-events: none; }
 #bursts { pointer-events: none; z-index: 3; inset: -80px; width: calc(100% + 160px); height: calc(100% + 160px); }
 .bubble-target { position: absolute; border: 0; border-radius: 50%; background: transparent; padding: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: pointer; }
+.bubble-haptic { position: absolute; margin: 0; opacity: 0; z-index: 1; clip-path: circle(50%); touch-action: none; cursor: pointer; }
+html[data-reduced="true"] .bubble-haptic { pointer-events: none; }
 .bubble-target:focus-visible { outline-offset: 8px; }
 .bubble-target[data-popped="true"] { cursor: grab; }
 .bubble-target[data-popped="true"]:active { cursor: grabbing; }

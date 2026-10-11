@@ -15,6 +15,7 @@ const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
 const playground=$('.playground');
 const pointers=new Map();
+const rawTouchEvents='ontouchstart' in window;
 const activationTimers=new Map();
 const keyboardOwners=new Map();
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
@@ -39,6 +40,25 @@ const buttons=bubbles.map((bubble,i)=>{
   $('#targets').append(button);
   return button;
 });
+// iOS provides native switch haptics only for trusted direct clicks. Keep
+// these targets separate from the accessible hold buttons, and never .click()
+// them from script. The native tick happens on release, not in the pop frame.
+const nativeHaptics='switch' in document.createElement('input')&&matchMedia('(pointer: coarse)').matches;
+const hapticTargets=nativeHaptics?buttons.map((_,i)=>{
+  const input=document.createElement('input');
+  input.type='checkbox';input.setAttribute('switch','');input.className='bubble-haptic';
+  input.tabIndex=-1;input.setAttribute('aria-hidden','true');input.dataset.index=i;
+  input.addEventListener('click',event=>{
+    if(reduced||hitBubble(event)!==i){event.preventDefault();return;}
+    if(event.isTrusted)buttons[i].focus({preventScroll:true});
+  });
+  $('#targets').append(input);return input;
+}):[];
+
+function pulse(duration) {
+  if(reduced||nativeHaptics||typeof navigator.vibrate!=='function')return;
+  try { navigator.vibrate(duration); } catch { /* Haptics are optional. */ }
+}
 
 function wake(seconds=.9) {
   renderDirty=true;
@@ -54,9 +74,6 @@ function tick(ms) {
     const b=bubbles[i];
     if(b.step(dt,now)) {
       const p=layout[i];
-      // Rupture ends this sound gesture. The held finger may keep deforming
-      // the film, but rubbing resumes only after release and a fresh touch.
-      audio.rubbing.end(i);
       audio.pop();
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
@@ -64,7 +81,7 @@ function tick(ms) {
       const count=bubbles.filter(b=>b.popped).length;
       $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
       animateUntil=now+1.1;
-      if(navigator.vibrate&&!reduced) navigator.vibrate(12);
+      pulse(12);
     }
     active ||= b.active;
   }
@@ -78,17 +95,13 @@ function tick(ms) {
   if(active||bursting||now<animateUntil) frame=requestAnimationFrame(tick);
 }
 function cancelBubble(index) {
-  audio.rubbing.end(index);
-  for(const [pointerId,owner] of pointers) if(owner===index) {
-    pointers.delete(pointerId);
-    if(buttons[index].hasPointerCapture(pointerId)) buttons[index].releasePointerCapture(pointerId);
-  }
+  for(const [pointerId,contact] of pointers) if(contact.index===index) releasePointer(pointerId);
   clearTimeout(activationTimers.get(index));activationTimers.delete(index);
   keyboardOwners.delete(index);bubbles[index].release();
 }
 function cancelAll() {
   bubbles.forEach((_,index)=>cancelBubble(index));
-  audio.rubbing.stopAll();
+  for(const pointerId of pointers.keys())releasePointer(pointerId);
   wake();
 }
 function resize() {
@@ -100,6 +113,7 @@ function resize() {
   for(let i=0;i<buttons.length;i++) {
     const p=layout[i],button=buttons[i];
     Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
+    if(hapticTargets[i])hapticTargets[i].style.cssText=button.style.cssText;
   }
   const dpr=Math.min(devicePixelRatio||1,2.5);
   renderer?.resize(width,height,dpr);
@@ -118,32 +132,48 @@ function coordinates(event,index) {
   const rect=$('.playground').getBoundingClientRect(),p=layout[index];
   return {x:(event.clientX-rect.left-p.x)/p.radius,y:(event.clientY-rect.top-p.y)/p.radius};
 }
-buttons.forEach((button,i)=>{
-  button.addEventListener('pointerdown',event=>{
-    if(event.button!==0||bubbles[i].active) return;
-    event.preventDefault();audio.unlock();
-    const p=coordinates(event,i);
-    if(Math.hypot(p.x,p.y)>1.08)return;
-    pointers.set(event.pointerId,i);button.setPointerCapture(event.pointerId);
-    const now=performance.now()/1000;
-    bubbles[i].press(p.x,p.y,event.pressure,now);
-    audio.rubbing.begin(i,{...p,popped:bubbles[i].popped,pan:event.clientX/innerWidth*2-1},now);wake();
-  });
-  button.addEventListener('pointermove',event=>{
-    if(pointers.get(event.pointerId)!==i)return;
-    const p=coordinates(event,i);
-    if(Math.hypot(p.x,p.y)>1.35) {
-      cancelBubble(i);wake();return;
+function hitBubble(event) {
+  const rect=playground.getBoundingClientRect();
+  const x=event.clientX-rect.left,y=event.clientY-rect.top;
+  return layout.findIndex(p=>Math.hypot(x-p.x,y-p.y)<=p.radius);
+}
+function releasePointer(pointerId) {
+  const contact=pointers.get(pointerId);if(!contact)return;
+  pointers.delete(pointerId);
+  if(contact.index!==null)bubbles[contact.index].release();
+  if(contact.capture?.hasPointerCapture(pointerId))contact.capture.releasePointerCapture(pointerId);
+}
+function movePointer(event) {
+  const contact=pointers.get(event.pointerId);if(!contact)return;
+  const index=hitBubble(event);
+  if(contact.index!==index) {
+    if(contact.index!==null)bubbles[contact.index].release();
+    contact.index=null;
+    if(index>=0) {
+      const p=coordinates(event,index);
+      if(bubbles[index].press(p.x,p.y,event.pressure,performance.now()/1000)) {
+        contact.index=index;pulse(5);
+      }
     }
-    bubbles[i].move(p.x,p.y,event.pressure);
-    audio.rubbing.move(i,{...p,popped:bubbles[i].popped,pan:event.clientX/innerWidth*2-1},performance.now()/1000);wake();
-  });
-  const release=event=>{
-    if(pointers.get(event.pointerId)!==i)return;
-    pointers.delete(event.pointerId);audio.rubbing.end(i);bubbles[i].release();wake();
-  };
-  button.addEventListener('pointerup',event=>{audio.unlock();release(event);});
-  button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);
+  } else if(index>=0) {
+    const p=coordinates(event,index);bubbles[index].move(p.x,p.y,event.pressure);
+  }
+  wake();
+}
+playground.addEventListener('pointerdown',event=>{
+  if((rawTouchEvents&&event.pointerType==='touch')||event.button!==0||pointers.has(event.pointerId))return;
+  event.preventDefault();audio.unlock();
+  // Capture the original target for the whole gesture, including empty film.
+  // Coordinates choose the current pocket; event.target stays at the origin.
+  const capture=event.target;
+  pointers.set(event.pointerId,{index:null,capture});capture.setPointerCapture(event.pointerId);
+  movePointer(event);
+});
+playground.addEventListener('pointermove',movePointer);
+playground.addEventListener('pointerup',event=>{audio.unlock();releasePointer(event.pointerId);wake();});
+playground.addEventListener('pointercancel',event=>{releasePointer(event.pointerId);wake();});
+playground.addEventListener('lostpointercapture',event=>{releasePointer(event.pointerId);wake();});
+buttons.forEach((button,i)=>{
   button.addEventListener('keydown',event=>{
     if(![' ','Enter'].includes(event.key))return;
     event.preventDefault();if(event.repeat)return;
@@ -170,9 +200,38 @@ buttons.forEach((button,i)=>{
 });
 document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
 document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
-// `touch-action` covers modern engines; preventDefault is the fallback for
-// browsers that still offer search, translate, or scroll gestures mid-drag.
-playground.addEventListener('touchmove',event=>event.preventDefault(),{passive:false});
+// Browsers may adjust pointer/click coordinates to a nearby control. Raw
+// touches keep the actual finger location, and their target stays at the
+// gesture origin even across gaps, so no per-pocket pointer capture is needed.
+function touchPointer(touch) {
+  return {pointerId:'touch:'+touch.identifier,clientX:touch.clientX,clientY:touch.clientY,pressure:touch.force||.5};
+}
+playground.addEventListener('touchstart',event=>{
+  for(const touch of event.changedTouches) {
+    const pointer=touchPointer(touch);
+    pointers.set(pointer.pointerId,{index:null,capture:null});movePointer(pointer);
+    // Cancel a browser-adjusted native switch before its default activation.
+    const index=hitBubble(touch),target=touch.target.closest('.bubble-haptic');
+    if(index<0||(target&&index!==Number(target.dataset.index)))event.preventDefault();
+  }
+},{passive:false});
+playground.addEventListener('touchmove',event=>{
+  event.preventDefault();
+  for(const touch of event.changedTouches??[])movePointer(touchPointer(touch));
+},{passive:false});
+playground.addEventListener('touchend',event=>{
+  for(const touch of event.changedTouches) {
+    const pointer=touchPointer(touch),target=touch.target.closest('.bubble-haptic'),index=hitBubble(touch);
+    if(index<0||(target&&(reduced||!pointers.has(pointer.pointerId)||index!==Number(target.dataset.index))))event.preventDefault();
+    releasePointer(pointer.pointerId);
+  }
+  wake();
+},{passive:false});
+playground.addEventListener('touchcancel',event=>{
+  if(event.cancelable)event.preventDefault();
+  for(const touch of event.changedTouches)releasePointer(touchPointer(touch).pointerId);
+  wake();
+},{passive:false});
 playground.addEventListener('gesturestart',event=>event.preventDefault());
 playground.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('pointermove',event=>{
@@ -185,6 +244,7 @@ $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();}
 $('#reset').addEventListener('click',()=>{
   audio.unlock();cancelAll();effects.clear();
   bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
+  hapticTargets.forEach(input=>{input.checked=false;});
   buttons.forEach((button,i)=>{button.dataset.popped='false';button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
   $('#announcement').textContent=`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 });
@@ -261,6 +321,7 @@ $('#tilt-permission').addEventListener('click',()=>deviceLighting.enable({userGe
 $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
+  hapticTargets.forEach(input=>{input.disabled=reduced;});
   light=lightTarget={x:0,y:0,angle:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});

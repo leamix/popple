@@ -339,7 +339,10 @@ try {
       // First flush the initial pending capture so there is an actual capture
       // to lose; releasing before gotpointercapture produces no lost event.
       if (cancellation === 'lostpointercapture') await page.mouse.move(p.x + 1, p.y);
-      if (cancellation === 'move-away') await page.mouse.move(p.x + 130, p.y);
+      if (cancellation === 'move-away') {
+        const next=await center(page,5);
+        await page.mouse.move((p.x+next.x)/2,p.y);
+      }
       else await page.locator('.bubble-target').nth(4).evaluate((button, type) => {
         if (type === 'lostpointercapture') button.releasePointerCapture(1);
         else button.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));

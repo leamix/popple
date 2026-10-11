@@ -1,5 +1,4 @@
 import { PopSequence, synthesizePop } from './sound.js';
-import { FrictionPlayer } from './friction-player.js';
 
 // Short, dry plastic transients and perimeter-only comic accents.
 // Everything is generated locally: no audio download or external dependencies.
@@ -28,7 +27,6 @@ export class PopAudio {
     this.output = null;
     this.limiter = null;
     this.disposed = false;
-    this.rubbing = new FrictionPlayer(this);
   }
 
   // Call directly inside pointerdown/keydown; mobile Safari needs this gesture.
@@ -77,10 +75,10 @@ export class PopAudio {
         return Promise.resolve(false);
       }
     }
-    if (this.context.state === 'running') { this.rubbing.prepare(); return Promise.resolve(true); }
+    if (this.context.state === 'running') return Promise.resolve(true);
     return this.context.resume().then(() => {
       if (this.disposed || !this.enabled) return false;
-      this.rubbing.prepare(); return true;
+      return true;
     }).catch(() => false);
   }
 
@@ -115,7 +113,6 @@ export class PopAudio {
 
   setEnabled(enabled) {
     this.enabled = Boolean(enabled);
-    if (!this.enabled) this.rubbing.stopAll();
     if (this.output && this.context) {
       this.output.gain.setTargetAtTime(this.enabled ? 0.9 : 0, this.context.currentTime, 0.006);
     }
@@ -123,7 +120,6 @@ export class PopAudio {
 
   dispose() {
     this.disposed = true;
-    this.rubbing.dispose();
     for (const source of this.sources) {
       try { source.stop(); } catch { /* A completed source is already silent. */ }
       source.disconnect();
