@@ -1,8 +1,10 @@
 const RADIANS = Math.PI / 180;
-export const MAX_LIGHT_SHIFT = .085;
+const DATA_TIMEOUT = 5000;
+export const MAX_LIGHT_SHIFT = .17;
 
 export function angleDifference(angle, reference) {
-  return ((angle - reference + 540) % 360 + 360) % 360 - 180;
+  const difference = angle % 360 - reference % 360;
+  return ((difference + 540) % 360 + 360) % 360 - 180;
 }
 
 export function readOrientation(event) {
@@ -20,10 +22,10 @@ export function orientationLight(event, baseline, screenAngle = 0) {
     ? 0 : angleDifference(sample.alpha, reference.alpha) * RADIANS;
   // A small movement of a broad light source, not an object sliding on the film.
   // Tilt is softened before the radial bound; yaw gently turns the same reflection.
-  const dx = .07 * Math.tanh(angleDifference(sample.gamma, reference.gamma) / 35)
-    - .024 * Math.sin(yaw);
-  const dy = -.062 * Math.tanh(angleDifference(sample.beta, reference.beta) / 35)
-    + .012 * (1 - Math.cos(yaw));
+  const dx = .14 * Math.tanh(angleDifference(sample.gamma, reference.gamma) / 35)
+    - .048 * Math.sin(yaw);
+  const dy = -.124 * Math.tanh(angleDifference(sample.beta, reference.beta) / 35)
+    + .024 * (1 - Math.cos(yaw));
   const angle = (Number.isFinite(screenAngle) ? screenAngle : 0) * RADIANS;
   // Rotate device axes into the currently displayed screen axes.
   const x = dx * Math.cos(angle) + dy * Math.sin(angle);
@@ -56,6 +58,7 @@ export class DeviceLighting {
     this.epoch = 0;
     this.timer = null;
     this.lastTime = null;
+    this.lastDataTime = null;
     this.angle = this.screenAngle();
     this.handleOrientation = event => this.receive(event);
     this.handleRotation = () => {
@@ -63,14 +66,28 @@ export class DeviceLighting {
       this.recenter();
       if (this.active) this.awaitData();
     };
-    this.handleVisibility = () => this.sync();
+    this.handleReturn = () => {
+      if (!this.document?.hidden && this.document?.hasFocus?.() !== false) this.interrupted = false;
+      this.sync();
+    };
+    this.handleVisibility = this.handleReturn;
     this.handleBlur = () => { this.interrupted = true; this.sync(); };
     this.handleFocus = () => { this.interrupted = false; this.sync(); };
+    this.handleInteraction = event => {
+      // A genuine interaction can restore a mobile page if closing a native
+      // permission sheet omitted focus. It never requests another permission.
+      if (!event.isTrusted || this.document?.hidden || !this.interrupted) return;
+      this.interrupted = false;
+      this.sync();
+    };
     environment?.addEventListener('orientationchange', this.handleRotation);
     environment?.screen?.orientation?.addEventListener('change', this.handleRotation);
     environment?.addEventListener('blur', this.handleBlur);
     environment?.addEventListener('focus', this.handleFocus);
+    environment?.addEventListener('pageshow', this.handleReturn);
     this.document?.addEventListener('visibilitychange', this.handleVisibility);
+    this.document?.addEventListener('pointerdown', this.handleInteraction, true);
+    this.document?.addEventListener('keydown', this.handleInteraction, true);
   }
 
   screenAngle() {
@@ -94,14 +111,15 @@ export class DeviceLighting {
     if (this.reduced) { this.setStatus('reduced'); return this.status; }
     if (this.pending) return this.status;
     if (typeof api.requestPermission === 'function' && !this.permissionGranted) {
-      // Never request from startup, a bubble press, a resume or a timer. The caller
-      // must explicitly identify the settings click; check activation where supported.
+      // Registering a listener can reuse a browser's existing grant after reload.
+      // Observing does not request permission or assume the browser preserved it.
       if (!userGesture || env.navigator?.userActivation?.isActive === false) {
-        this.setStatus('permission-required'); return this.status;
+        this.sync(); return this.status;
       }
+      if (!this.document?.hidden) this.interrupted = false;
       const epoch = ++this.epoch;
       this.pending = true;
-      this.setStatus('pending');
+      this.sync();
       let permission;
       try {
         // Invoked before the first await so iOS retains the click's activation.
@@ -110,7 +128,10 @@ export class DeviceLighting {
       if (this.destroyed || epoch !== this.epoch) return this.status;
       this.pending = false;
       this.permissionDenied = permission !== 'granted';
-      if (this.permissionDenied) { this.setStatus('denied'); return this.status; }
+      // A settled permission sheet is a deliberate return to a visible focused
+      // page, even if the browser emitted blur without a matching focus event.
+      if (!this.document?.hidden && this.document?.hasFocus?.() !== false) this.interrupted = false;
+      if (this.permissionDenied) { this.sync(); return this.status; }
       this.permissionGranted = true;
     } else this.permissionGranted = true;
     this.sync();
@@ -134,14 +155,15 @@ export class DeviceLighting {
       this.permissionGranted = true;
     }
     const blocked = this.reduced || this.suspended || this.interrupted || this.document?.hidden;
-    if (!this.enabled || blocked || !this.permissionGranted) {
+    if (!this.enabled || blocked || !api || this.environment.isSecureContext === false
+      || this.pending || this.permissionDenied) {
       this.stopListening();
       if (!this.enabled) this.setStatus('idle');
       else if (this.reduced) this.setStatus('reduced');
       else if (blocked) this.setStatus('suspended');
-      else if (this.pending) this.setStatus('pending');
       else if (!this.environment?.DeviceOrientationEvent) this.setStatus('unavailable');
       else if (this.environment.isSecureContext === false) this.setStatus('insecure');
+      else if (this.pending) this.setStatus('pending');
       else if (this.permissionDenied) this.setStatus('denied');
       else this.setStatus('permission-required');
       return;
@@ -155,11 +177,25 @@ export class DeviceLighting {
 
   awaitData() {
     this.clearTimer();
-    this.setStatus('listening');
+    this.setStatus(this.permissionGranted ? 'listening' : 'permission-required');
+    this.watchData();
+  }
+
+  watchData(delay = DATA_TIMEOUT) {
     this.timer = this.environment.setTimeout(() => {
       this.timer = null;
-      if (this.active && !this.hasData) this.setStatus('no-data');
-    }, 5000);
+      if (!this.active) return;
+      if (this.hasData) {
+        const silence = this.now() - this.lastDataTime;
+        if (silence < DATA_TIMEOUT) { this.watchData(DATA_TIMEOUT - silence); return; }
+        this.recenter();
+      }
+      this.setStatus(this.permissionGranted ? 'no-data' : 'permission-required');
+    }, delay);
+  }
+
+  now() {
+    return this.environment.performance?.now?.() ?? Date.now();
   }
 
   receive(event) {
@@ -173,10 +209,13 @@ export class DeviceLighting {
     // Devices may start providing yaw after tilt; its first reading is neutral.
     if (this.baseline.alpha === null && sample.alpha !== null) this.baseline.alpha = sample.alpha;
     this.hasData = true;
-    this.clearTimer();
+    // Finite sensor output is evidence that this browser actually allowed access.
+    this.permissionGranted = true;
     this.setStatus('granted');
     const target = orientationLight(sample, this.baseline, angle);
-    const time = this.environment.performance?.now?.() ?? Date.now();
+    const time = this.now();
+    this.lastDataTime = time;
+    if (this.timer === null) this.watchData();
     const dt = this.lastTime === null ? 1 / 60 : Math.max(0, Math.min(.1, (time - this.lastTime) / 1000));
     this.lastTime = time;
     const easing = 1 - Math.exp(-dt * 12);
@@ -199,6 +238,7 @@ export class DeviceLighting {
     this.baseline = null;
     this.hasData = false;
     this.lastTime = null;
+    this.lastDataTime = null;
     this.vector = { x: 0, y: 0 };
     this.onChange({ ...this.vector });
   }
@@ -225,7 +265,10 @@ export class DeviceLighting {
     env?.screen?.orientation?.removeEventListener('change', this.handleRotation);
     env?.removeEventListener('blur', this.handleBlur);
     env?.removeEventListener('focus', this.handleFocus);
+    env?.removeEventListener('pageshow', this.handleReturn);
     this.document?.removeEventListener('visibilitychange', this.handleVisibility);
+    this.document?.removeEventListener('pointerdown', this.handleInteraction, true);
+    this.document?.removeEventListener('keydown', this.handleInteraction, true);
     this.destroyed = true;
   }
 }
