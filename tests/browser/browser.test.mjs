@@ -52,12 +52,17 @@ report.browser.chromium = browser.version();
 report.browser.playwright = JSON.parse(await readFile(path.join(playwrightPath, 'package.json'), 'utf8')).version;
 const physics = await readFile(path.join(root, 'physics.js'), 'utf8');
 const instrumentedPhysics = physics.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
+const rendererSource = await readFile(path.join(root, 'renderer.js'), 'utf8');
+const instrumentedRenderer = rendererSource.replace('render(bubbles,layout,dark,time,light) {', 'render(bubbles,layout,dark,time,light) { globalThis.__lastLight={...light};');
 const activeContexts = [];
 
 async function context(options = {}) {
-  const ctx = await browser.newContext(options);
+  const {initScript,...browserOptions}=options;
+  const ctx = await browser.newContext(browserOptions);
   activeContexts.push(ctx);
+  if(initScript) await ctx.addInitScript(initScript);
   await ctx.route('**/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedPhysics }));
+  await ctx.route('**/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedRenderer }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push({ type: 'pageerror', message: error.message }));
   page.on('console', message => {
@@ -347,6 +352,33 @@ try {
     const p = await center(reduced); await reduced.mouse.move(p.x, p.y); await reduced.mouse.down();
     await waitPopped(reduced); await reduced.mouse.up();
     assert.equal(await count(reduced), 1);
+  });
+  const {page:tilt}=await context({viewport:{width:390,height:844},initScript:()=>{
+    window.__permissionCalls=0;
+    Object.defineProperty(window,'DeviceOrientationEvent',{configurable:true,value:class extends Event {static async requestPermission(){window.__permissionCalls++;return 'granted';}}});
+  }});
+  await check('orientation permission is explicit; bounded light moves intact and popped film',async()=>{
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
+    const p=await center(tilt);await tilt.mouse.move(p.x,p.y);await tilt.mouse.down();await waitPopped(tilt);await tilt.mouse.up();
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
+    await tilt.locator('#settings-open').click();await tilt.locator('#tilt').click();
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),1);await tilt.locator('#settings-close').click();
+    await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:355,beta:40,gamma:0});window.dispatchEvent(event);});
+    await tilt.waitForTimeout(150);
+    const initial=await tilt.evaluate(()=>({...__lastLight}));
+    for(let i=0;i<12;i++){
+      await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:25,beta:72,gamma:28});window.dispatchEvent(event);});
+      await tilt.waitForTimeout(35);
+    }
+    await tilt.waitForTimeout(450);
+    const shifted=await tilt.evaluate(()=>({...__lastLight}));
+    assert.ok(Math.hypot(shifted.x,shifted.y)>.015&&Math.hypot(shifted.x,shifted.y)<=.085);
+    assert.ok(Math.hypot(shifted.x-initial.x,shifted.y-initial.y)>.015);assert.equal(await count(tilt),1);
+    await screenshot(tilt,'mobile-tilt-dark.png');await tilt.locator('#theme').click();await tilt.waitForTimeout(150);await screenshot(tilt,'mobile-tilt-light.png');
+    await tilt.locator('#settings-open').click();await tilt.locator('#motion').check();await tilt.waitForTimeout(120);
+    assert.deepEqual(await tilt.evaluate(()=>({...__lastLight})),{x:0,y:0});assert.equal(await tilt.locator('#tilt').isDisabled(),true);
+    await tilt.locator('#settings-close').click();
+    return {initial,shifted,permissionCalls:1};
   });
   await check('final reloaded renderer screenshots and all-popped frame sample', async () => {
     await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);

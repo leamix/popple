@@ -2,6 +2,7 @@ import { BubbleState, DEFAULT_HOLD_SECONDS } from './physics.js';
 import { FilmRenderer } from './renderer.js';
 import { PopAudio, BurstLayer } from './effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from './layout.js';
+import { DeviceLighting } from './lighting.js';
 
 const $ = selector => document.querySelector(selector);
 const storage = {
@@ -22,6 +23,12 @@ let dark=storage.get('theme','dark')==='dark';
 let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
 let layout=[],renderer,frame=0,lastTime=0,animateUntil=0,renderDirty=true,contextLost=false;
 let light={x:0,y:0}, lightTarget={x:0,y:0};
+let tiltWanted=storage.get('tilt','true')==='true',tiltStatus='idle';
+const deviceLighting=new DeviceLighting({
+  reduced,
+  onChange:vector=>{lightTarget=vector;wake(.7);},
+  onStatus:status=>{tiltStatus=status;updateTilt();}
+});
 const buttons=bubbles.map((bubble,i)=>{
   const button=document.createElement('button');
   button.className='bubble-target';button.type='button';button.dataset.index=i;
@@ -157,7 +164,7 @@ buttons.forEach((button,i)=>{
 document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
 document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
 document.addEventListener('pointermove',event=>{
-  if(event.pointerType==='touch'||reduced)return;
+  if(event.pointerType==='touch'||reduced||deviceLighting.hasData)return;
   lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055};wake(.55);
 },{passive:true});
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
@@ -213,10 +220,34 @@ settings.addEventListener('close',()=>{
   document.body.classList.remove('settings-open');backdropPress=false;
   $('#settings-open').focus({preventScroll:true});
 });
+function updateTilt() {
+  const enabled=['pending','listening','granted','no-data'].includes(tiltStatus);
+  $('#tilt').setAttribute('aria-pressed',String(enabled));
+  $('#tilt').disabled=reduced||tiltStatus==='pending';
+  $('#tilt').textContent=enabled?'Выключить':'Включить';
+  const messages={
+    idle:'',pending:'Ждём разрешения на доступ к движению.',
+    listening:'Немного наклони телефон, чтобы оживить блики.',granted:'Блики следуют за движением телефона.',
+    denied:'Доступ к движению закрыт. Его можно разрешить в настройках браузера.',
+    unavailable:'На этом устройстве наклон недоступен.',insecure:'Для наклона открой страницу через HTTPS.',
+    'no-data':'Датчик пока не передаёт движение. Попробуй наклонить телефон.',
+    'permission-required':'Нажми «Включить» и разреши доступ к движению.',
+    reduced:'Наклон отключён, пока включено «Меньше эффектов».',suspended:''
+  };
+  $('#tilt-status').textContent=messages[tiltStatus]??'';
+}
+$('#tilt').addEventListener('click',()=>{
+  if(['listening','granted','no-data'].includes(tiltStatus)) {
+    tiltWanted=false;deviceLighting.disable();
+  }else{
+    tiltWanted=true;deviceLighting.enable({userGesture:true});
+  }
+  storage.set('tilt',String(tiltWanted));
+});
 $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
-  light=lightTarget={x:0,y:0};effects.clear();wake();
+  light=lightTarget={x:0,y:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));
@@ -225,9 +256,10 @@ window.addEventListener('blur',cancelAll);
 document.addEventListener('visibilitychange',()=>{
   cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else wake();
 });
-$('#film').addEventListener('webglcontextlost',event=>{event.preventDefault();cancelAll();contextLost=true;cancelAnimationFrame(frame);frame=0;});
-$('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;renderer.initialize();resize();});
+$('#film').addEventListener('webglcontextlost',event=>{event.preventDefault();cancelAll();contextLost=true;deviceLighting.setSuspended(true);cancelAnimationFrame(frame);frame=0;});
+$('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;deviceLighting.setSuspended(false);renderer.initialize();resize();});
 try { renderer=new FilmRenderer($('#film')); } catch(error) {
   console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
 }
 updateSound();updateHold();setReduced(reduced);setTheme();resize();
+if(tiltWanted) deviceLighting.enable();

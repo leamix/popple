@@ -50,7 +50,7 @@ html[data-theme="light"] .sheet::after { opacity: 0; }
 .reset svg { width: 16px; height: 16px; }
 .icon-button { border: 1px solid var(--line); width: 44px; height: 44px; padding: 0; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; background: transparent; color: var(--muted); transition: background 150ms ease-out, color 150ms ease-out, transform 150ms ease-out; }
 .icon-button:active { transform: scale(.94); background: var(--surface); color: var(--text); }
-@media (hover: hover) { .icon-button:hover { background: var(--surface); color: var(--text); } }
+@media (hover: hover) { .icon-button:hover, .tilt-button:hover { background: var(--surface); color: var(--text); } }
 .sound-muted { display: none; }
 #sound[aria-pressed="false"] .sound-waves { display: none; }
 #sound[aria-pressed="false"] .sound-muted { display: block; }
@@ -66,6 +66,11 @@ body.settings-open { overflow: hidden; }
 .setting-label output { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 input[type="range"] { display: block; width: 100%; margin: 10px 0 5px; accent-color: var(--accent); height: 32px; cursor: pointer; touch-action: pan-y; }
 .settings-field p { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 5px 0 0; }
+.tilt-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
+.tilt-button { min-height: 44px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 22px; background: transparent; font-size: 12px; transition: background 150ms ease-out; }
+.tilt-button[aria-pressed="true"] { background: var(--surface); }
+.tilt-button:disabled { cursor: default; opacity: .55; }
+.tilt-status:empty { display: none; }
 .motion-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 13px; }
 .motion-label input { width: 19px; height: 19px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .settings-footer { margin: 20px 0 0; color: var(--muted); font-size: 11px; text-align: center; line-height: 1.6; }
@@ -102,5 +107,5 @@ html[data-reduced="true"] .settings-dialog { animation: none; }
 @media (max-width: 360px) { .topbar { padding-left: 16px; padding-right: 16px; } .topbar-actions { gap: 6px; } .settings-dialog { padding: 20px; } .settings-header h2 { font-size: 19px; } }
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon { transition: none !important; }
-  .reset, .icon-button { transition: none; }
+  .reset, .icon-button, .tilt-button { transition: none; }
 }

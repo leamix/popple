@@ -77,11 +77,28 @@ float box(vec2 p, vec2 halfSize, float softness) {
   vec2 d=abs(p)-halfSize;
   return 1.-smoothstep(-softness,softness,max(d.x,d.y));
 }
-vec3 environment(vec3 r, float roughness) {
+vec2 lightCoordinates(vec3 r) {
   vec3 l=normalize(vec3(-.55,.72,.42));
   vec3 axis=normalize(cross(vec3(0.,1.,0.),l));
   vec3 up=cross(l,axis);
-  vec2 uv=vec2(atan(dot(r,axis),dot(r,l)),atan(dot(r,up),dot(r,l)))+u_light;
+  return vec2(atan(dot(r,axis),dot(r,l)),atan(dot(r,up),dot(r,l)))+u_light;
+}
+// A short tapered strip inside the larger reflected window reaches white.
+// Its rounded ends and softly curved edge follow the reflected source rather
+// than painting a highlight onto a fixed point on the bubble.
+vec2 highlightMasks(vec2 uv, float roughness) {
+  vec2 local=uv-vec2(-.19,.032);
+  float taper=pow(max(0.,1.-sq(local.x/.29)),.65);
+  float across=local.y+.012*sin(local.x*5.);
+  float endFade=1.-smoothstep(.22,.29,abs(local.x));
+  float width=.036*taper;
+  float core=(1.-smoothstep(width*.63,width+.010+roughness*.020,abs(across)))*endFade;
+  // Only the positive-y boundary carries a tiny chromatic fringe.
+  float fringe=exp(-sq((across-width-.009)/(.008+roughness*.018)))*endFade;
+  return vec2(core,fringe);
+}
+vec3 environment(vec3 r, float roughness) {
+  vec2 uv=lightCoordinates(r);
   float key=box(uv,vec2(.73,.19),.035+roughness*.19);
   float inner=box(uv+vec2(.014,.012),vec2(.66,.143),.028+roughness*.16);
   float split=1.-.10*exp(-sq((uv.x+.12)/.012));
@@ -153,13 +170,10 @@ void main() {
   float shade=dot(normal,normalize(vec3(-.6,.75,1.)));
   vec3 env=environment(reflected,c*mix(.11,.18,u_dark));
   float reflection=(.38+fresnel*.65)*mix(1.,.63,c);
-  // An optically thin neutral film; only a whisper of chromatic edge dispersion.
-  vec3 edgeTint=.5+.5*cos(vec3(0.,2.,4.)+(1.-normal.z)*19.+h*8.);
   vec3 spec=env*reflection*body;
   // Bright daylight reflections with a crisp core, without filling the clear
   // body with white. The dark theme keeps its original lighting response.
   spec*=mix(1.9,1.,u_dark);
-  spec+=edgeTint*.016*fresnel*body*(1.-c)*u_dark;
   float lipLight=.45+.35*sin(angleOf(q)-.3)+.20*sin(angleOf(q)*9.+u_seed);
   float litEdge=pow(max(0.,dot(direction,normalize(vec2(-.6,.8)))),3.);
   spec+=mix(vec3(1.),vec3(.88,.94,1.),u_dark)*rim*lipLight*mix(.15+.80*litEdge,1.25,u_dark)*(1.-c*.3);
@@ -173,6 +187,16 @@ void main() {
   // Fold contrast retains the depressed shape after popping without glassy glare.
   spec+=c*body*max(0.,(-dx+dy)*.09);
   spec=1.-exp(-max(vec3(0.),spec)*1.4);
+  vec2 sourceUV=lightCoordinates(reflected);
+  vec2 highlight=highlightMasks(sourceUV,c*mix(.11,.18,u_dark));
+  spec=mix(spec,vec3(.997),highlight.x*body);
+  // A very weak thin-film-like optical approximation: wavelength phase varies
+  // with viewing angle and local film height. Plastic is thicker than soap;
+  // confining this hint to one bright border avoids an all-over rainbow skin.
+  float opticalPath=930.+sourceUV.x*510.+normal.z*115.+h*48.;
+  vec3 spectrum=.5+.5*cos(2.*PI*opticalPath/vec3(650.,510.,440.));
+  spectrum-=vec3((spectrum.r+spectrum.g+spectrum.b)/3.);
+  spec=clamp(spec+spectrum*highlight.y*body*.032,0.,1.);
   float specMax=max(spec.r,max(spec.g,spec.b));
   // Keep clear film colourless. One faint contact contour describes its seal;
   // stacked dark/white studio strips made the lower-right edge look moulded.
