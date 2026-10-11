@@ -29,7 +29,9 @@ vec2 shape(vec2 p) {
   float irregular=1.+.012*sin(5.*a+u_seed*8.)+.006*sin(9.*a+u_seed*13.);
   // The footprint expands a little as air is displaced away from the contact.
   vec2 shift=-u_touch*u_bulge*.065;
-  return (p-shift)/(irregular*(1.+u_compression*.055));
+  // A vented pocket has no pressure to spread its sealed footprint further.
+  float expansion=mix(u_compression,.06,clamp(u_collapse,0.,1.));
+  return (p-shift)/(irregular*(1.+expansion*.055));
 }
 float heightAt(vec2 p) {
   vec2 q=shape(p);
@@ -48,23 +50,35 @@ float heightAt(vec2 p) {
   if(c>.001) {
     // Venting removes pressure support, not the film's molded volume. The
     // contact dent and freer opposite lobe remain in a varied, slack skin.
+    float knead=clamp(u_compression-.06,0.,.18);
+    vec2 contact=u_touch*.67;
+    float contactFalloff=exp(-dot(q-contact,q-contact)/.115);
+    float fixedRim=1.-smoothstep(.72,.99,r);
+    // Slack folds slide a little under the pad of the finger. The displacement
+    // fades into the welded rim and never restores the popped pocket's dome.
+    vec2 drag=contact-u_dent.xy;
+    drag*=min(1.,.5/max(length(drag),.0001));
+    vec2 slack=q-drag*knead*.22*contactFalloff*fixedRim;
     collapsedHeight=u_air*pow(max(0.,1.-r*r),.78);
-    vec2 dip=q-u_dent.xy;
+    vec2 dip=slack-u_dent.xy;
     collapsedHeight-=u_dent.z*exp(-dot(dip,dip)/u_dent.w);
     for(int i=0;i<3;i++) {
-      vec2 v=q-u_pockets[i].xy;
+      vec2 v=slack-u_pockets[i].xy;
       collapsedHeight+=u_pockets[i].z*exp(-dot(v,v)/u_pockets[i].w);
     }
     for(int i=0;i<5;i++) {
       vec4 fold=u_folds[i], profile=u_foldProfile[i];
-      float along=dot(q,fold.xy);
-      float across=dot(q,vec2(-fold.y,fold.x));
+      float along=dot(slack,fold.xy);
+      float across=dot(slack,vec2(-fold.y,fold.x));
       float line=across-fold.z-profile.y*along*along;
       float taper=smoothstep(-.96,-.55,along)*(1.-smoothstep(profile.z,.98,along));
       float ridge=exp(-sq(line/fold.w));
       float valley=exp(-sq((line+fold.w*1.7)/(fold.w*2.2)));
-      collapsedHeight+=(ridge-valley*.42)*profile.x*taper;
+      collapsedHeight+=(ridge-valley*.42)*profile.x*taper*(1.-knead*1.6*contactFalloff);
     }
+    // Supported film stops against the backing; pressing cannot push it through.
+    float supportedHeight=min(collapsedHeight,.012);
+    collapsedHeight=max(supportedHeight,collapsedHeight-knead*.50*contactFalloff*fixedRim);
     collapsedHeight*=edge;
   }
   float h=mix(dome,collapsedHeight,c);

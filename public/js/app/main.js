@@ -56,8 +56,7 @@ function tick(ms) {
       audio.pop();
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
-      buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул`);
-      buttons[i].setAttribute('aria-disabled','true');
+      buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул. Можно помять плёнку`);
       const count=bubbles.filter(b=>b.popped).length;
       $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
       $('#caption').textContent=count===bubbles.length?'Вся плёнка твоя. Возьмём ещё?':'Вот и всё. Можно ещё один.';
@@ -116,7 +115,7 @@ function coordinates(event,index) {
 buttons.forEach((button,i)=>{
   button.addEventListener('contextmenu',event=>event.preventDefault());
   button.addEventListener('pointerdown',event=>{
-    if(event.button!==0||bubbles[i].popped||bubbles[i].active) return;
+    if(event.button!==0||bubbles[i].active) return;
     event.preventDefault();audio.unlock();
     const p=coordinates(event,i);
     if(Math.hypot(p.x,p.y)>1.08)return;
@@ -151,12 +150,12 @@ buttons.forEach((button,i)=>{
   button.addEventListener('blur',()=>{cancelBubble(i);wake();});
   // Assistive-technology activation has no physical key/pointer hold.
   button.addEventListener('click',event=>{
-    if(event.detail===0&&!bubbles[i].active&&!bubbles[i].popped){
+    if(event.detail===0&&!bubbles[i].active){
       audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
       const timer=setTimeout(()=>{
         if(activationTimers.get(i)!==timer)return;
         bubbles[i].release();activationTimers.delete(i);wake();
-      },(bubbles[i].holdDuration+.2)*1000);
+      },(bubbles[i].popped?.24:bubbles[i].holdDuration+.2)*1000);
       activationTimers.set(i,timer);
     }
   });

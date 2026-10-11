@@ -182,6 +182,26 @@ try {
     assert.equal(await count(page), 1);
     return { elapsedMs };
   });
+  await check('popped film yields under dragging, settles, and never bursts again', async () => {
+    const read=()=>page.evaluate(()=>{
+      const b=__bubbleStates[4];return {active:b.active,x:b.x,y:b.y,compression:b.compression,bulge:b.bulge,popX:b.popX,popY:b.popY,collapse:b.collapse};
+    });
+    const before=await read(),announcement=await page.locator('#announcement').textContent();
+    const p=await center(page,4,-.24,.1);
+    await page.mouse.move(p.x,p.y);await page.mouse.down();await page.waitForTimeout(200);
+    const held=await read();
+    assert.ok(held.active&&held.compression>.12&&held.compression<.2&&held.bulge===0);
+    await page.mouse.move(p.x+25,p.y-12);await page.waitForTimeout(950);
+    const moved=await read();assert.ok(moved.x>held.x+.4&&moved.y<held.y-.2);
+    assert.deepEqual([moved.popX,moved.popY],[before.popX,before.popY]);
+    assert.equal(await count(page),1);assert.equal(await page.locator('#announcement').textContent(),announcement);
+    assert.equal(await page.locator('.bubble-target').nth(4).getAttribute('aria-disabled'),null);
+    await screenshot(page,'desktop-popped-kneading.png');
+    await page.mouse.up();await page.waitForTimeout(850);
+    const released=await read();assert.ok(!released.active&&Math.abs(released.compression-.06)<.001&&released.bulge===0);
+    assert.ok(Math.hypot(released.x,released.y)<.001);assert.ok(released.collapse>.99);
+    return {held,moved,released};
+  });
   await check('reset restores all fourteen pockets', () => reset(page));
   await check('three icon controls and modal support focus, escape, backdrop and saved timing', async () => {
     assert.equal(await page.locator('.topbar-actions > button').count(),3);
@@ -319,7 +339,19 @@ try {
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     assert.equal(await count(mobile), 2); await mobile.waitForTimeout(300);
     await screenshot(mobile, 'mobile-dark-popped.png');
-    await reset(mobile);
+  });
+  await check('two fingers can knead popped film', async () => {
+    const a=await center(mobile,3),b=await center(mobile,5);
+    const announcement=await mobile.locator('#announcement').textContent();
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...a,id:1,force:.5},{...b,id:2,force:.5}]});
+    await mobile.waitForTimeout(250);
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:a.x+12,y:a.y+8,id:1,force:.5},{x:b.x-12,y:b.y-8,id:2,force:.5}]});
+    await mobile.waitForTimeout(200);
+    const states=await mobile.evaluate(()=>[3,5].map(i=>({compression:__bubbleStates[i].compression,active:__bubbleStates[i].active,bulge:__bubbleStates[i].bulge})));
+    assert.ok(states.every(b=>b.active&&b.compression>.12&&b.bulge===0));
+    assert.equal(await mobile.locator('#announcement').textContent(),announcement);assert.equal(await count(mobile),2);
+    await screenshot(mobile,'mobile-popped-kneading.png');
+    await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await reset(mobile);
   });
   await check('touch cancellation stops a hold', async () => {
     const p = await center(mobile);

@@ -40,7 +40,8 @@ html[data-theme="light"] .sheet::after { opacity: 0; }
 #bursts { pointer-events: none; z-index: 3; inset: -80px; width: calc(100% + 160px); height: calc(100% + 160px); }
 .bubble-target { position: absolute; border: 0; border-radius: 50%; background: transparent; padding: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: pointer; }
 .bubble-target:focus-visible { outline-offset: 8px; }
-.bubble-target[data-popped="true"] { cursor: default; }
+.bubble-target[data-popped="true"] { cursor: grab; }
+.bubble-target[data-popped="true"]:active { cursor: grabbing; }
 .below-film { display: flex; gap: 7px; align-items: center; margin: 6px 0 19px; min-height: 18px; }
 .below-film p { margin: 0; font-size: 11px; letter-spacing: .1px; color: var(--muted); }
 .tiny-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--accent); opacity: .8; }

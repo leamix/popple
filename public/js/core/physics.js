@@ -1,6 +1,7 @@
 export const DEFAULT_HOLD_SECONDS = 0.78;
 const MIN_HOLD_SECONDS = 0.52;
 const HOLD_PRESSURE_RATIO = MIN_HOLD_SECONDS / DEFAULT_HOLD_SECONDS;
+const FILM_REST_COMPRESSION = 0.06;
 const MAX_FRAME_SECONDS = 0.05;
 const MAX_HOLD_FRAME_SECONDS = 0.1;
 
@@ -62,7 +63,7 @@ export class BubbleState {
   }
 
   press(x, y, pressure = 0.5, timeSeconds = 0) {
-    if (this.popped || this.active) return false;
+    if (this.active) return false;
     this.active = true;
     this.x = this._targetX = position(x);
     this.y = this._targetY = position(y);
@@ -72,15 +73,15 @@ export class BubbleState {
     this._pressureVaries = false;
     this._pressStartedAt = finite(timeSeconds);
     this._heldSeconds = 0;
-    this.holdProgress = 0;
+    this.holdProgress = this.popped ? 1 : 0;
     // A visible dimple belongs to the very first contact frame.
-    this.compression = Math.max(this.compression, 0.16);
-    this.bulge = Math.max(this.bulge, 0.035);
+    this.compression = Math.max(this.compression, this.popped ? 0.085 : 0.16);
+    this.bulge = this.popped ? 0 : Math.max(this.bulge, 0.035);
     return true;
   }
 
   move(x, y, pressure = 0.5) {
-    if (!this.active || this.popped) return false;
+    if (!this.active) return false;
     this._targetX = position(x);
     this._targetY = position(y);
     this._pressure = pressureValue(pressure);
@@ -125,9 +126,11 @@ export class BubbleState {
         this.popX = this._targetX;
         this.popY = this._targetY;
         this.popped = true;
-        this.active = false;
+        // Contact remains live after rupture, so the same finger can drag the
+        // slack film. It never starts another hold or another pop event.
         this.holdProgress = 1;
         this.popAge = 0;
+        this.bulge = this._bulgeVelocity = 0;
         didPop = true;
       }
     }
@@ -142,7 +145,10 @@ export class BubbleState {
     }
 
     const force = this._pressureVaries ? this._pressure : 0.5;
-    const targetCompression = this.popped ? 0.06 : this.active
+    // A ruptured pocket has no sealed air to displace. Only a shallow local
+    // indentation remains; saved popX/popY still locate the permanent creases.
+    const targetCompression = this.popped
+      ? this.active ? 0.12 + 0.07 * force : FILM_REST_COMPRESSION : this.active
       ? 0.25 + 0.53 * Math.pow(this.holdProgress, 0.85) + 0.05 * force : 0;
     const distance = Math.min(1, Math.hypot(this.x, this.y));
     const targetBulge = this.popped ? 0 : targetCompression * (0.20 + distance * 0.36);
@@ -152,15 +158,17 @@ export class BubbleState {
     const count = Math.ceil(delta / (1 / 180));
     const h = delta / count;
     for (let i = 0; i < count; i += 1) {
-      const positionStiffness = this.active ? 650 : 205;
-      const positionDamping = this.active ? 36 : 21;
+      const positionStiffness = this.popped ? this.active ? 390 : 165 : this.active ? 650 : 205;
+      const positionDamping = this.popped ? this.active ? 42 : 29 : this.active ? 36 : 21;
       this._vx += ((this._targetX - this.x) * positionStiffness - this._vx * positionDamping) * h;
       this._vy += ((this._targetY - this.y) * positionStiffness - this._vy * positionDamping) * h;
       this.x += this._vx * h;
       this.y += this._vy * h;
 
-      const stiffness = this.popped ? 600 : this.active ? 430 : 270;
-      const damping = this.active ? 30 : 24;
+      const stiffness = this.popped ? 560 : this.active ? 430 : 270;
+      // Slack plastic dissipates the poke instead of rebounding like an air
+      // pocket. Keep this response close to critically damped.
+      const damping = this.popped ? 48 : this.active ? 30 : 24;
       this._compressionVelocity += ((targetCompression - this.compression) * stiffness -
         this._compressionVelocity * damping) * h;
       this.compression += this._compressionVelocity * h;
@@ -169,11 +177,18 @@ export class BubbleState {
     }
 
     this.compression = clamp(this.compression, 0, 1);
-    this.bulge = clamp(this.bulge, 0, 0.6);
+    this.bulge = this.popped ? 0 : clamp(this.bulge, 0, 0.6);
     this.x = clamp(this.x, -1, 1);
     this.y = clamp(this.y, -1, 1);
     if (!this.active && !this.popped && this.compression < 0.0001 && this.bulge < 0.0001) {
       this.compression = this.bulge = 0;
+      this._compressionVelocity = this._bulgeVelocity = 0;
+      this.x = this.y = this._vx = this._vy = 0;
+    }
+    if (!this.active && this.popped &&
+        Math.abs(this.compression - FILM_REST_COMPRESSION) < 0.0001 &&
+        Math.hypot(this.x, this.y) < 0.0001) {
+      this.compression = FILM_REST_COMPRESSION;
       this._compressionVelocity = this._bulgeVelocity = 0;
       this.x = this.y = this._vx = this._vy = 0;
     }
