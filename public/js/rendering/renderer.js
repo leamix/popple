@@ -130,12 +130,18 @@ vec3 environment(vec3 r, float roughness) {
   vec3 side=normalize(vec3(.85,-.3,.12));
   vec3 sx=normalize(cross(vec3(0.,1.,0.),side)), sy=cross(side,sx);
   vec2 suv=vec2(atan(dot(r,sx),dot(r,side)),atan(dot(r,sy),dot(r,side)));
-  float rim=box(suv+u_light,vec2(.075,.58),.023+roughness*.12);
+  // The side source has a soft cross-section and gradually narrowing ends.
+  // Its reflection follows the membrane rather than reading as a drawn arc.
+  vec2 sideUV=suv+u_light;
+  float endFade=exp(-sq(sq(sideUV.y/(.47+roughness*.20))));
+  float sideWidth=.025+.042*sqrt(endFade)+roughness*.10;
+  float rim=exp(-sq(sideUV.x/sideWidth))*endFade;
+  float rimBloom=exp(-sq(sideUV.x/(sideWidth+.028+roughness*.10)))*endFade*.10;
   float bottom=pow(max(0.,dot(r,normalize(vec3(-.5,-.8,.1)))),45.);
   float broad=pow(max(0.,dot(r,normalize(vec3(-.6,.8,1.)))),3.);
   vec3 env=vec3(.12,.14,.16)*broad;
   env+=vec3(.94,.98,1.)*(key*.8+inner*2.4)*split;
-  env+=vec3(1.,.95,.85)*rim*1.6;
+  env+=vec3(1.,.95,.85)*(rim*1.6+rimBloom);
   env+=vec3(.65,.83,1.)*bottom*.5;
   // Preserve tonal detail in the larger daylight reflection. The brightest
   // lobe is added after tone mapping; the whole window should not clip white.
