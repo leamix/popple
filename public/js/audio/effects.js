@@ -46,12 +46,16 @@ export class PopAudio {
         this.limiter.attack.value = 0.001;
         this.limiter.release.value = 0.06;
 
-        // An instantaneous soft ceiling also bounds simultaneous finger pops.
+        // Keep single pops linear. Only overlapping peaks meet the soft knee;
+        // saturating the entire signal adds a gritty edge to headphone playback.
         this.ceiling = this.context.createWaveShaper();
         const curve = new Float32Array(2048);
         for (let i = 0; i < curve.length; i++) {
           const x = (i / (curve.length - 1)) * 2 - 1;
-          curve[i] = Math.tanh(x * 1.35) * 0.92;
+          const magnitude = Math.abs(x);
+          const knee = 0.8;
+          curve[i] = Math.sign(x) * (magnitude <= knee ? magnitude :
+            knee + 0.16 * Math.tanh((magnitude - knee) / 0.16));
         }
         this.ceiling.curve = curve;
         this.ceiling.oversample = '2x';
@@ -131,7 +135,7 @@ export class BurstLayer {
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
-    this.serial = 1;
+    this.serial = Math.floor(Math.random() * 4294967296);
     canvas.style.pointerEvents = 'none';
     canvas.setAttribute('aria-hidden', 'true');
   }
@@ -150,16 +154,34 @@ export class BurstLayer {
   burst(x, y, radius, { dark = true, reducedMotion = false } = {}) {
     if (!this.context) return;
     const random = randomFrom(++this.serial * 9817);
-    const count = reducedMotion ? 5 : 9;
-    const rotation = random() * 0.5;
-    const rays = Array.from({ length: count }, (_, i) => ({
-      angle: rotation + (i / count) * TAU + (random() - 0.5) * 0.22,
-      kind: reducedMotion ? 2 : i % 4,
-      size: 0.8 + random() * 0.45,
-      reach: 0.7 + random() * 0.55,
-      delay: reducedMotion ? 0 : random() * 0.022,
-      turn: (random() - 0.5) * 0.3,
-    }));
+    const count = reducedMotion ? 3 + Math.floor(random() * 3) : 7 + Math.floor(random() * 5);
+    // Irregular gaps keep accents apart without creating the same radial stamp.
+    const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.8);
+    const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
+    let angle = random() * TAU;
+    let previousKind = Math.floor(random() * 4);
+    const rays = gaps.map((gap) => {
+      const kind = reducedMotion ? 2 : (previousKind + 1 + Math.floor(random() * 3)) % 4;
+      previousKind = kind;
+      const ray = {
+        angle,
+        kind,
+        size: 1 + random() * 0.5,
+        aspect: 0.88 + random() * 0.24,
+        flip: random() < 0.5 ? -1 : 1,
+        tilt: (random() - 0.5) * 0.55,
+        reach: 0.65 + random() * 0.65,
+        offset: 5 + random() * 5,
+        delay: reducedMotion ? 0 : random() * 0.028,
+        turn: reducedMotion ? 0 : (random() - 0.5) * 0.65,
+        detail: random() < 0.65,
+        detailOffset: 0.7 + random() * 0.6,
+        bend: 0.7 + random() * 0.6,
+        strokeCount: 1 + Math.floor(random() * 3),
+      };
+      angle += (gap / totalGap) * TAU;
+      return ray;
+    });
     this.bursts.push({ x, y, radius: Math.max(8, radius), dark, reducedMotion, rays,
       start: performance.now() / 1000, duration: reducedMotion ? 0.18 : 0.51 });
     // Multitouch remains bounded even if a caller emits an accidental stream.
@@ -191,9 +213,9 @@ export class BurstLayer {
         const appear = burst.reducedMotion ? 0.6 : 0.78 + Math.sin(local * Math.PI) * 0.25;
         ctx.save();
         ctx.rotate(ray.angle);
-        ctx.translate(burst.radius + 7 * scale + travel, 0);
-        ctx.rotate(ray.turn * local);
-        ctx.scale(scale * ray.size * appear, scale * ray.size * appear);
+        ctx.translate(burst.radius + ray.offset * scale + travel, 0);
+        ctx.rotate(ray.tilt + ray.turn * local);
+        ctx.scale(scale * ray.size * appear * ray.aspect, scale * ray.size * appear * ray.flip);
         ctx.globalAlpha = opacity;
         ctx.lineJoin = 'round';
         ctx.lineCap = 'round';
@@ -201,10 +223,10 @@ export class BurstLayer {
         ctx.fillStyle = burst.dark ? '#f4df9b' : '#f6cd64';
         ctx.lineWidth = 1.15;
 
-        if (ray.kind === 0) this.dart(ctx);
-        else if (ray.kind === 1) this.lightning(ctx);
-        else if (ray.kind === 2) this.strokes(ctx, burst.dark);
-        else this.star(ctx, burst.dark, local);
+        if (ray.kind === 0) this.dart(ctx, ray);
+        else if (ray.kind === 1) this.lightning(ctx, ray);
+        else if (ray.kind === 2) this.strokes(ctx, burst.dark, ray);
+        else this.star(ctx, burst.dark, local, ray);
         ctx.restore();
       }
       ctx.restore();
@@ -212,64 +234,72 @@ export class BurstLayer {
     return this.bursts.length > 0;
   }
 
-  dart(ctx) {
+  dart(ctx, ray) {
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(18, -5);
-    ctx.lineTo(16, 4);
+    ctx.lineTo(18, -5 * ray.bend);
+    ctx.lineTo(16, 4 * ray.bend);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(10, -7);
-    ctx.lineTo(21, -12);
-    ctx.strokeStyle = ctx.fillStyle;
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
+    if (ray.detail) {
+      ctx.beginPath();
+      ctx.moveTo(10, -7 * ray.detailOffset);
+      ctx.lineTo(21, -12 * ray.detailOffset);
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
   }
 
-  lightning(ctx) {
+  lightning(ctx, ray) {
     ctx.beginPath();
     ctx.moveTo(0, 1);
-    ctx.lineTo(10, -5);
+    ctx.lineTo(10, -5 * ray.bend);
     ctx.lineTo(10, -1);
-    ctx.lineTo(23, -6);
-    ctx.lineTo(14, 5);
+    ctx.lineTo(23, -6 * ray.bend);
+    ctx.lineTo(14, 5 * ray.bend);
     ctx.lineTo(14, 1);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
   }
 
-  strokes(ctx, dark) {
+  strokes(ctx, dark, ray) {
     ctx.strokeStyle = dark ? '#f6edd2' : '#3f515e';
     ctx.lineWidth = 1.6;
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.lineTo(16, -0.6);
-    ctx.moveTo(5, -5);
-    ctx.lineTo(14, -7);
-    ctx.moveTo(7, 5);
-    ctx.lineTo(19, 7);
+    ctx.lineTo(16, -0.6 * ray.bend);
+    if (ray.strokeCount > 1) {
+      ctx.moveTo(5, -5 * ray.bend);
+      ctx.lineTo(14, -7 * ray.bend);
+    }
+    if (ray.strokeCount > 2) {
+      ctx.moveTo(7, 5 * ray.bend);
+      ctx.lineTo(19, 7 * ray.bend);
+    }
     ctx.stroke();
   }
 
-  star(ctx, dark, progress) {
+  star(ctx, dark, progress, ray) {
     ctx.translate(7, 0);
-    ctx.rotate(progress * 0.4);
+    ctx.rotate(progress * ray.turn);
     ctx.fillStyle = dark ? '#fff1c7' : '#ffdf88';
     ctx.beginPath();
-    ctx.moveTo(0, -7);
+    ctx.moveTo(0, -7 * ray.bend);
     ctx.quadraticCurveTo(1.7, -1.5, 7, 0);
-    ctx.quadraticCurveTo(1.7, 1.5, 0, 7);
+    ctx.quadraticCurveTo(1.7, 1.5, 0, 7 * ray.bend);
     ctx.quadraticCurveTo(-1.7, 1.5, -7, 0);
-    ctx.quadraticCurveTo(-1.7, -1.5, 0, -7);
+    ctx.quadraticCurveTo(-1.7, -1.5, 0, -7 * ray.bend);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(12, -8, 1.4, 0, TAU);
-    ctx.fill();
+    if (ray.detail) {
+      ctx.beginPath();
+      ctx.arc(12 * ray.detailOffset, -8 * ray.detailOffset, 1.4, 0, TAU);
+      ctx.fill();
+    }
   }
 
   clear() {

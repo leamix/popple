@@ -40,11 +40,13 @@ export class PopSequence {
 }
 
 const profiles = {
-  snap: { duration: .071, spread: .012, decay: .0029, cutoff: 11600, highpass: 950, noise: 1.3, resonance: .22, frequency: 410, ring: .0045, cracks: [1, 3], crackEnd: .023 },
-  body: { duration: .101, spread: .013, decay: .0060, cutoff: 4200, highpass: 110, noise: .60, resonance: .93, frequency: 165, ring: .013, cracks: [2, 4], crackEnd: .037 },
-  crinkle: { duration: .133, spread: .010, decay: .0035, cutoff: 8600, highpass: 620, noise: .92, resonance: .32, frequency: 280, ring: .006, cracks: [9, 15], crackEnd: .091 },
-  tight: { duration: .084, spread: .012, decay: .0016, cutoff: 15400, highpass: 2900, noise: 1.4, resonance: .15, frequency: 720, ring: .0025, cracks: [2, 4], crackEnd: .026 },
-  double: { duration: .133, spread: .010, decay: .0038, cutoff: 7300, highpass: 470, noise: .92, resonance: .45, frequency: 245, ring: .007, cracks: [3, 5], crackEnd: .076 },
+  snap: { duration: .068, spread: .010, decay: .0027, cutoff: 7800, highpass: 700, noise: 1.18, resonance: .20, frequency: 600, ring: .0028 },
+  body: { duration: .078, spread: .012, decay: .0034, cutoff: 6200, highpass: 450, noise: 1.20, resonance: .36, frequency: 350, ring: .0045 },
+  // Keep the public family ID, but use one slightly longer folded-film snap.
+  // Delayed noise microcracks sounded like electrical static in headphones.
+  crinkle: { duration: .078, spread: .013, decay: .0042, cutoff: 6900, highpass: 650, noise: 1.14, resonance: .26, frequency: 470, ring: .0040 },
+  tight: { duration: .061, spread: .012, decay: .00165, cutoff: 7600, highpass: 1000, noise: 1.24, resonance: .18, frequency: 880, ring: .0021 },
+  double: { duration: .109, spread: .012, decay: .0028, cutoff: 7500, highpass: 600, noise: 1.18, resonance: .25, frequency: 500, ring: .0033 },
 };
 
 /**
@@ -79,13 +81,17 @@ export function synthesizePop(sampleRate, seed, family = POP_FAMILIES[(seed >>> 
     const begin = Math.round(start * sampleRate);
     const end = Math.min(samples.length, begin + Math.ceil(Math.max(noiseDecay, ringDecay) * 8 * sampleRate));
     let low = 0;
+    let smooth = 0;
     let bass = 0;
     for (let i = begin; i < end; i++) {
       const t = (i - begin) / sampleRate;
       low += lowCoefficient * ((random() * 2 - 1) - low);
-      bass += highCoefficient * (low - bass);
+      // Two low-pass stages keep a defined attack without the sand-like
+      // near-white-noise edge of a single high-cutoff filter.
+      smooth += lowCoefficient * (low - smooth);
+      bass += highCoefficient * (smooth - bass);
       const rise = 1 - Math.exp(-t / attack);
-      const noise = (low - bass) * noiseLevel * Math.exp(-t / noiseDecay);
+      const noise = (smooth - bass) * noiseLevel * Math.exp(-t / noiseDecay);
       // Very short fixed resonances supply the body of trapped air. No pitch
       // sweep, reverb, or sustained tone that could read as a game laser.
       const body = (Math.sin(TAU * resonanceFrequency * t) +
@@ -105,26 +111,10 @@ export function synthesizePop(sampleRate, seed, family = POP_FAMILIES[(seed >>> 
     });
   }
 
-  const crackCount = profile.cracks[0] + Math.floor(random() * (profile.cracks[1] - profile.cracks[0] + 1));
-  for (let i = 0; i < crackCount; i++) {
-    const spacing = (i + .45 + random() * .8) / (crackCount + 1);
-    const start = .006 + spacing * profile.crackEnd;
-    const level = family === 'crinkle' ? .16 + random() * .23 : .07 + random() * .12;
-    transient(start, level, {
-      decay: vary(family === 'crinkle' ? .0019 : .00115, .45),
-      ring: .0015,
-      resonance: .05,
-      noise: 1,
-      cutoff: vary(family === 'body' ? 6100 : 11500, .22),
-      highpass: 1300,
-      attack: .00009 + random() * .00009,
-    });
-  }
-
   let peak = 0;
   for (let i = 0; i < samples.length; i++) {
     // A continuous tail gate guarantees silence in the final tenth, including
-    // the longer crinkly examples; it never truncates the leading snap.
+    // the occasional double rupture; it never truncates the leading snap.
     const position = i / (samples.length - 1);
     const tail = clamp((.90 - position) / .12, 0, 1);
     samples[i] *= tail * tail * (3 - 2 * tail);

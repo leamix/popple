@@ -30,13 +30,29 @@ test('every family has a finite audible transient, bounded peak and silent tail'
   }
 });
 
-test('family changes alter colour and crackle timing, not just pitch', () => {
+test('single pops keep a defined attack and fade without detached late crackles', () => {
+  for (const family of POP_FAMILIES.filter(family => family !== 'double')) {
+    for (let i = 0; i < 64; i++) {
+      const result = measurements(synthesizePop(48000, 4207 + i * 9817, family));
+      // The former bass-heavy family lost almost all attack definition, while
+      // its thin counterpart approached raw white noise (brightness ~2).
+      assert.ok(result.brightness > .12 && result.brightness < 1.3,
+        `${family} has an overly dull or harsh attack: ${result.brightness}`);
+      // A single rupture must decay promptly, without new noise clicks tens
+      // of milliseconds later that read as electrical static in headphones.
+      assert.ok(result.lateFraction < .005,
+        `${family} has detached late noise: ${result.lateFraction}`);
+    }
+  }
+});
+
+test('family changes alter colour and envelope, not just pitch', () => {
   const results = Object.fromEntries(POP_FAMILIES.map(family => [family, measurements(synthesizePop(48000, 4207, family))]));
-  // A dense low snap versus thin taut plastic: a broad spectral separation.
-  assert.ok(results.tight.brightness > results.body.brightness * 8);
-  assert.ok(results.snap.brightness > results.body.brightness * 5);
-  // Crinkled film and the rare double have a real, audible second part.
-  assert.ok(results.crinkle.lateFraction > .08);
+  // Fuller and tauter film still differ, while both keep a clear attack.
+  assert.ok(results.tight.brightness > results.body.brightness * 1.4);
+  assert.ok(results.snap.brightness > results.body.brightness * 1.2);
+  // Only the intentional, occasional double has an audible second rupture.
+  assert.ok(results.crinkle.lateFraction < .005);
   assert.ok(results.double.lateFraction > .2);
   assert.ok(results.snap.lateFraction < .015);
   assert.ok(results.tight.lateFraction < .015);

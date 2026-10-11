@@ -13,7 +13,7 @@ const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
 const pointers=new Map();
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
-const burstPadding=48;
+const burstPadding=80;
 let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
 let dark=storage.get('theme','dark')==='dark';
 let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
