@@ -14,13 +14,20 @@
 <body>
   <header class="topbar">
     <a class="wordmark" href="./" aria-label="No rush, начать заново">no rush</a>
-    <button class="theme-button" id="theme" aria-label="Включить светлую тему" title="Переключить тему">
+    <div class="topbar-actions" role="group" aria-label="Настройки плёнки">
+    <button class="icon-button" id="theme" aria-label="Включить светлую тему" title="Переключить тему">
       <span class="t-icon-swap" data-state="a" aria-hidden="true">
         <svg class="t-icon" data-icon="a" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
         <svg class="t-icon" data-icon="b" viewBox="0 0 24 24"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5 8.6 8.6 0 1 0 20.5 14.2Z"/></svg>
       </span>
-      <span id="theme-label">Светлее</span>
     </button>
+    <button id="sound" class="icon-button" aria-label="Выключить звук" aria-pressed="true" title="Звук">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 4-6 5H2v6h3l6 5Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-muted" d="m16 9 6 6m0-6-6 6"/></svg>
+    </button>
+    <button id="settings-open" class="icon-button" aria-label="Настроить под себя" aria-haspopup="dialog" aria-controls="settings" title="Настройки">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.7 3-.5 2.1-1.4.8-2.1-.6-2.3 4 1.6 1.5v1.6l-1.6 1.5 2.3 4 2.1-.6 1.4.8.5 2.1h4.6l.5-2.1 1.4-.8 2.1.6 2.3-4-1.6-1.5v-1.6l1.6-1.5-2.3-4-2.1.6-1.4-.8-.5-2.1Z"/><circle cx="12" cy="11.6" r="3.1"/></svg>
+    </button>
+    </div>
   </header>
   <main>
     <div class="intro">
@@ -40,21 +47,28 @@
     </div>
     <div class="controls">
       <button id="reset" class="reset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"/></svg>Ещё плёнку</button>
-      <button id="sound" class="icon-button" aria-label="Выключить звук" aria-pressed="true" title="Звук">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 4-6 5H2v6h3l6 5Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-muted" d="m16 9 6 6m0-6-6 6"/></svg>
-      </button>
     </div>
-    <details class="settings">
-      <summary>Настроить под себя <span aria-hidden="true">+</span></summary>
-      <div class="settings-body">
-        <label class="size-label" for="size">Размер пузырька <output id="size-value">≈ 2 см</output></label>
-        <input id="size" type="range" min="64" max="100" value="84" step="2" aria-label="Размер пузырька">
-        <p>Размер на экранах отличается — подстрой под свой палец.</p>
-        <label class="motion-label"><input id="motion" type="checkbox"> Меньше эффектов</label>
-      </div>
-    </details>
     <p class="sr-only" id="announcement" aria-live="polite" aria-atomic="true"></p>
   </main>
+  <dialog id="settings" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
+    <div class="settings-header">
+      <h2 id="settings-title">Настроить под себя</h2>
+      <button id="settings-close" class="icon-button" aria-label="Закрыть настройки" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+    </div>
+    <p id="settings-description" class="settings-description">Пусть плёнка ощущается как тебе нравится.</p>
+    <div class="settings-field">
+      <label class="setting-label" for="size">Размер пузырька <output id="size-value" for="size">≈ 2 см</output></label>
+      <input id="size" type="range" min="64" max="100" value="84" step="2" aria-describedby="size-description">
+      <p id="size-description">Размер на экранах отличается — подстрой под свой палец.</p>
+    </div>
+    <div class="settings-field">
+      <label class="setting-label" for="hold">Время до хлопка <output id="hold-value" for="hold">0,78 с</output></label>
+      <input id="hold" type="range" min="0.2" max="2" value="0.78" step="0.02" aria-describedby="hold-description">
+      <p id="hold-description">Как долго удерживать пузырёк. По умолчанию — 0,78 с.</p>
+    </div>
+    <label class="motion-label"><span>Меньше эффектов</span><input id="motion" type="checkbox"></label>
+    <p class="settings-footer">Настройки сохраняются сами.</p>
+  </dialog>
   <script type="module" src="app.js"></script>
 </body>
 </html>

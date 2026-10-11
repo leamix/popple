@@ -178,6 +178,26 @@ try {
     return { elapsedMs };
   });
   await check('reset restores all fourteen pockets', () => reset(page));
+  await check('three icon controls and modal support focus, escape, backdrop and saved timing', async () => {
+    assert.equal(await page.locator('.topbar-actions > button').count(),3);
+    assert.equal((await page.locator('#theme').textContent()).trim(),'');
+    await page.locator('#settings-open').click();assert.equal(await page.locator('#settings').isVisible(),true);
+    assert.equal(await page.locator('#hold').inputValue(),'0.78');
+    await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'motion');
+    await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'settings-close');
+    await page.keyboard.press('Escape');assert.equal(await page.locator('#settings').isVisible(),false);
+    assert.equal(await page.evaluate(()=>document.activeElement.id),'settings-open');
+    await page.locator('#settings-open').click();await page.locator('#hold').fill('1.4');
+    await page.mouse.click(3,3);assert.equal(await page.locator('#settings').isVisible(),false);
+    const p=await center(page);await page.mouse.move(p.x,p.y);await page.mouse.down();
+    await page.waitForTimeout(1000);assert.equal(await count(page),0);await page.mouse.up();
+    await page.locator('#settings-open').click();await page.locator('#hold').fill('0.24');await page.locator('#settings-close').click();
+    await page.reload();await page.waitForFunction(()=>__bubbleStates?.length===14);
+    assert.ok(await page.evaluate(()=>__bubbleStates.every(b=>b.holdDuration===.24)));
+    const q=await center(page);await page.mouse.move(q.x,q.y);await page.mouse.down();await waitPopped(page,4,1200);await page.mouse.up();
+    await page.locator('#settings-open').click();await page.locator('#hold').fill('0.78');await page.locator('#settings-close').click();
+    await reset(page);
+  });
   await check('edge rupture contact stays fixed after release, theme toggle and resize', async () => {
     const originalViewport = page.viewportSize();
     const originalTheme = await page.locator('html').getAttribute('data-theme');
@@ -311,12 +331,13 @@ try {
   });
   await check('320px mobile layout and maximum size stay within viewport', async () => {
     await mobile.setViewportSize({ width: 320, height: 680 });
-    await mobile.locator('summary').tap();
+    await mobile.locator('#settings-open').tap();
     await mobile.locator('#size').fill('100');
     assert.ok(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     const bounds = await mobile.locator('.playground').boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
     await screenshot(mobile, 'mobile-320-light.png');
+    await mobile.locator('#settings-close').tap();
     return { bounds, ...await inspectStaggeredLayout(mobile) };
   });
 
@@ -455,7 +476,7 @@ async function runWebKitSmoke() {
     });
     await check('320px staggered rows fit without overlapping visible film', async () => {
       await page.setViewportSize({ width: 320, height: 680 });
-      await page.locator('summary').tap(); await page.locator('#size').fill('100');
+      await page.locator('#settings-open').tap(); await page.locator('#size').fill('100');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await inspectStaggeredLayout(page);
     });

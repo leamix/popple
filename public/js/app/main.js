@@ -1,4 +1,4 @@
-import { BubbleState } from './physics.js';
+import { BubbleState, DEFAULT_HOLD_SECONDS } from './physics.js';
 import { FilmRenderer } from './renderer.js';
 import { PopAudio, BurstLayer } from './effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from './layout.js';
@@ -8,10 +8,13 @@ const storage = {
   get(key, fallback) { try { return localStorage.getItem('bubble.'+key) ?? fallback; } catch { return fallback; } },
   set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }
 };
-const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i));
+const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
+const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i,savedHold));
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
 const pointers=new Map();
+const activationTimers=new Map();
+const keyboardOwners=new Map();
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
 const burstPadding=80;
 let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
@@ -64,8 +67,16 @@ function tick(ms) {
   const bursting=effects.render(now);
   if(active||bursting||now<animateUntil) frame=requestAnimationFrame(tick);
 }
+function cancelBubble(index) {
+  for(const [pointerId,owner] of pointers) if(owner===index) {
+    pointers.delete(pointerId);
+    if(buttons[index].hasPointerCapture(pointerId)) buttons[index].releasePointerCapture(pointerId);
+  }
+  clearTimeout(activationTimers.get(index));activationTimers.delete(index);
+  keyboardOwners.delete(index);bubbles[index].release();
+}
 function cancelAll() {
-  pointers.clear();bubbles.forEach(b=>b.release());
+  bubbles.forEach((_,index)=>cancelBubble(index));
   wake();
 }
 function resize() {
@@ -87,7 +98,6 @@ function resize() {
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
   $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
-  $('#theme-label').textContent=dark?'Светлее':'Темнее';
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
   $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';
   storage.set('theme',dark?'dark':'light');wake(.4);
@@ -110,7 +120,7 @@ buttons.forEach((button,i)=>{
     if(pointers.get(event.pointerId)!==i)return;
     const p=coordinates(event,i);
     if(Math.hypot(p.x,p.y)>1.35) {
-      bubbles[i].release();pointers.delete(event.pointerId);wake();return;
+      cancelBubble(i);wake();return;
     }
     bubbles[i].move(p.x,p.y,event.pressure);wake();
   });
@@ -123,16 +133,24 @@ buttons.forEach((button,i)=>{
   button.addEventListener('keydown',event=>{
     if(![' ','Enter'].includes(event.key))return;
     event.preventDefault();if(event.repeat)return;
-    audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
+    audio.unlock();if(bubbles[i].press(0,0,.5,performance.now()/1000)) keyboardOwners.set(i,event.key);wake();
   });
   button.addEventListener('keyup',event=>{
-    if([' ','Enter'].includes(event.key)){event.preventDefault();bubbles[i].release();wake();}
+    if([' ','Enter'].includes(event.key)){
+      event.preventDefault();if(keyboardOwners.get(i)!==event.key)return;
+      keyboardOwners.delete(i);bubbles[i].release();wake();
+    }
   });
-  button.addEventListener('blur',()=>{bubbles[i].release();wake();});
+  button.addEventListener('blur',()=>{cancelBubble(i);wake();});
   // Assistive-technology activation has no physical key/pointer hold.
   button.addEventListener('click',event=>{
     if(event.detail===0&&!bubbles[i].active&&!bubbles[i].popped){
       audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
+      const timer=setTimeout(()=>{
+        if(activationTimers.get(i)!==timer)return;
+        bubbles[i].release();activationTimers.delete(i);wake();
+      },(bubbles[i].holdDuration+.2)*1000);
+      activationTimers.set(i,timer);
     }
   });
 });
@@ -158,9 +176,50 @@ $('#sound').addEventListener('click',()=>{
 });
 $('#size').value=diameter;
 $('#size').addEventListener('input',event=>{diameter=Number(event.target.value);storage.set('size',diameter);resize();});
+const holdFormat=new Intl.NumberFormat('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+function updateHold() {
+  const duration=bubbles[0].holdDuration;
+  $('#hold').value=duration;
+  $('#hold-value').textContent=holdFormat.format(duration)+' с';
+  $('#hold').setAttribute('aria-valuetext',holdFormat.format(duration)+' секунды');
+}
+$('#hold').addEventListener('input',event=>{
+  cancelAll();bubbles.forEach(b=>b.setHoldDuration(Number(event.target.value)));
+  storage.set('hold',bubbles[0].holdDuration);updateHold();
+});
+const settings=$('#settings');
+$('#settings-open').addEventListener('click',()=>{
+  cancelAll();settings.showModal();document.body.classList.add('settings-open');
+});
+$('#settings-close').addEventListener('click',()=>settings.close());
+settings.addEventListener('keydown',event=>{
+  if(event.key!=='Tab')return;
+  const controls=[...settings.querySelectorAll('button:not(:disabled),input:not(:disabled)')];
+  const first=controls[0],last=controls.at(-1);
+  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+});
+let backdropPress=false;
+settings.addEventListener('pointerdown',event=>{
+  const rect=settings.getBoundingClientRect();
+  backdropPress=event.target===settings&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom);
+});
+settings.addEventListener('pointerup',event=>{
+  const rect=settings.getBoundingClientRect();
+  if(backdropPress&&event.target===settings&&(event.clientX<rect.left||event.clientX>rect.right||event.clientY<rect.top||event.clientY>rect.bottom)) settings.close();
+  backdropPress=false;
+});
+settings.addEventListener('close',()=>{
+  document.body.classList.remove('settings-open');backdropPress=false;
+  $('#settings-open').focus({preventScroll:true});
+});
 $('#motion').checked=reduced;
-$('#motion').addEventListener('change',event=>{reduced=event.target.checked;storage.set('motion',String(reduced));effects.clear();wake();});
-reducedQuery.addEventListener('change',event=>{reduced=event.matches;$('#motion').checked=reduced;effects.clear();wake();});
+function setReduced(value) {
+  reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
+  light=lightTarget={x:0,y:0};effects.clear();wake();
+}
+$('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
+reducedQuery.addEventListener('change',event=>setReduced(event.matches));
 window.addEventListener('resize',resize);
 window.addEventListener('blur',cancelAll);
 document.addEventListener('visibilitychange',()=>{
@@ -171,4 +230,4 @@ $('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;render
 try { renderer=new FilmRenderer($('#film')); } catch(error) {
   console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
 }
-updateSound();setTheme();resize();
+updateSound();updateHold();setReduced(reduced);setTheme();resize();

@@ -1,5 +1,6 @@
-const DEFAULT_HOLD_SECONDS = 0.78;
+export const DEFAULT_HOLD_SECONDS = 0.78;
 const MIN_HOLD_SECONDS = 0.52;
+const HOLD_PRESSURE_RATIO = MIN_HOLD_SECONDS / DEFAULT_HOLD_SECONDS;
 const MAX_FRAME_SECONDS = 0.05;
 const MAX_HOLD_FRAME_SECONDS = 0.1;
 
@@ -21,10 +22,17 @@ function seedFor(index) {
  * the resulting surface. No device is assumed to have a force sensor.
  */
 export class BubbleState {
-  constructor(index = 0) {
+  constructor(index = 0, holdSeconds = DEFAULT_HOLD_SECONDS) {
     this.index = index;
     this.seed = seedFor(index);
+    this.setHoldDuration(holdSeconds);
     this.reset();
+  }
+
+  /** Nominal hold time; genuine varying force can shorten it proportionally. */
+  setHoldDuration(seconds) {
+    this.holdDuration = clamp(finite(seconds, DEFAULT_HOLD_SECONDS), 0.2, 2);
+    return this.holdDuration;
   }
 
   reset() {
@@ -109,8 +117,7 @@ export class BubbleState {
       this._heldSeconds += elapsed;
       const force = this._pressureVaries
         ? clamp((this._pressure - 0.35) / 0.65, 0, 1) : 0;
-      const duration = DEFAULT_HOLD_SECONDS -
-        force * (DEFAULT_HOLD_SECONDS - MIN_HOLD_SECONDS);
+      const duration = this.holdDuration * (1 - force * (1 - HOLD_PRESSURE_RATIO));
       this.holdProgress = clamp(this._heldSeconds / duration, 0, 1);
       if (this._heldSeconds + 1e-9 >= duration) {
         // Preserve the actual latest contact, not the spring-smoothed x/y.

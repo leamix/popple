@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BubbleState } from './physics.js';
+import { BubbleState, DEFAULT_HOLD_SECONDS } from './physics.js';
 
 function advance(bubble, seconds, frequency = 120) {
   let events = 0;
@@ -155,5 +155,49 @@ test('hold duration remains consistent from 10 to 120 frames per second', () => 
     assert.equal(advance(bubble, 0.06, frequency), 1);
     assert.equal(advance(bubble, 1, frequency), 0);
     assert.ok(bubble.collapse > 0.99);
+  }
+});
+
+test('nominal hold time keeps its existing default and follows a configured duration', () => {
+  assert.equal(DEFAULT_HOLD_SECONDS, 0.78);
+  for (const duration of [DEFAULT_HOLD_SECONDS, 0.2, 0.4, 1.2, 2]) {
+    const bubble = new BubbleState(13, duration);
+    assert.equal(bubble.holdDuration, duration);
+    bubble.press(0, 0);
+    assert.equal(advance(bubble, duration - 0.01), 0);
+    assert.equal(advance(bubble, 0.01), 1);
+    assert.equal(advance(bubble, 1), 0);
+    bubble.reset();
+    assert.equal(bubble.holdDuration, duration, 'sheet reset preserves the selected response');
+  }
+});
+
+test('hold duration changes clamp to supported times and discard invalid values', () => {
+  const bubble = new BubbleState(14);
+  assert.equal(bubble.holdDuration, DEFAULT_HOLD_SECONDS);
+  for (const invalid of [NaN, Infinity, -Infinity, undefined, null, '1']) {
+    assert.equal(bubble.setHoldDuration(invalid), DEFAULT_HOLD_SECONDS);
+  }
+  assert.equal(bubble.setHoldDuration(-10), 0.2);
+  assert.equal(bubble.setHoldDuration(100), 2);
+  assert.equal(bubble.setHoldDuration(1.1), 1.1);
+  bubble.press(0, 0);
+  assert.equal(advance(bubble, 1.09), 0);
+  assert.equal(advance(bubble, 0.01), 1);
+});
+
+test('genuine variable force preserves the existing pressure shortening ratio at every setting', () => {
+  for (const duration of [DEFAULT_HOLD_SECONDS, 0.3, 1.2, 2]) {
+    const variable = new BubbleState(15, duration);
+    const fixed = new BubbleState(16, duration);
+    variable.press(0, 0, 0.3);
+    variable.move(0, 0, 0.9);
+    variable.move(0, 0, 1);
+    fixed.press(0, 0, 1);
+    const forceDuration = duration * (0.52 / 0.78);
+    assert.equal(advance(variable, forceDuration - 0.01), 0);
+    assert.equal(advance(variable, 0.01), 1);
+    assert.equal(advance(fixed, forceDuration), 0, 'fixed pressure hardware retains nominal timing');
+    assert.equal(advance(fixed, duration - forceDuration), 1);
   }
 });
