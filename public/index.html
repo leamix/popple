@@ -67,9 +67,16 @@
       <p id="hold-description">Как долго удерживать пузырёк. По умолчанию — 0,78 с.</p>
     </div>
     <div class="settings-field tilt-setting">
-      <div class="tilt-row"><span id="tilt-label">Блики при наклоне</span><button id="tilt" class="tilt-button" type="button" aria-pressed="false" aria-labelledby="tilt-label tilt" aria-describedby="tilt-description tilt-status">Включить</button></div>
+      <div class="tilt-row">
+        <span id="tilt-label">Блики при наклоне</span>
+        <label class="ios-switch">
+          <input id="tilt" type="checkbox" role="switch" aria-labelledby="tilt-label" aria-describedby="tilt-description tilt-status">
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
       <p id="tilt-description">Слегка двигаются, когда ты наклоняешь или поворачиваешь телефон.</p>
       <p id="tilt-status" class="tilt-status" role="status"></p>
+      <button id="tilt-permission" class="permission-button" type="button" hidden>Разрешить доступ</button>
     </div>
     <label class="motion-label"><span>Меньше эффектов</span><input id="motion" type="checkbox"></label>
     <p class="settings-footer">Настройки сохраняются сами.</p>

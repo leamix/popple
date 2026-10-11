@@ -202,7 +202,7 @@ $('#settings-open').addEventListener('click',()=>{
 $('#settings-close').addEventListener('click',()=>settings.close());
 settings.addEventListener('keydown',event=>{
   if(event.key!=='Tab')return;
-  const controls=[...settings.querySelectorAll('button:not(:disabled),input:not(:disabled)')];
+  const controls=[...settings.querySelectorAll('button:not(:disabled),input:not(:disabled)')].filter(control=>control.getClientRects().length);
   const first=controls[0],last=controls.at(-1);
   if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
   else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
@@ -222,29 +222,30 @@ settings.addEventListener('close',()=>{
   $('#settings-open').focus({preventScroll:true});
 });
 function updateTilt() {
-  const enabled=['pending','listening','granted','no-data'].includes(tiltStatus);
-  $('#tilt').setAttribute('aria-pressed',String(enabled));
-  $('#tilt').disabled=reduced||tiltStatus==='pending';
-  $('#tilt').textContent=enabled?'Выключить':'Включить';
+  // The switch reflects the saved choice; the caption reflects actual access.
+  $('#tilt').checked=tiltWanted;
+  $('#tilt').disabled=deviceLighting.pending;
+  const status=deviceLighting.pending?'pending':tiltStatus;
+  $('#tilt-permission').hidden=!tiltWanted||!['permission-required','denied'].includes(status);
   const messages={
     idle:'',pending:'Ждём разрешения на доступ к движению.',
     listening:'Немного наклони телефон, чтобы оживить блики.',granted:'Блики следуют за движением телефона.',
     denied:'Доступ к движению закрыт. Его можно разрешить в настройках браузера.',
     unavailable:'На этом устройстве наклон недоступен.',insecure:'Для наклона открой страницу через HTTPS.',
     'no-data':'Датчик пока не передаёт движение. Попробуй наклонить телефон.',
-    'permission-required':'Нажми «Включить» и разреши доступ к движению.',
-    reduced:'Наклон отключён, пока включено «Меньше эффектов».',suspended:''
+    'permission-required':'Настройка включена. Разреши браузеру доступ к движению.',
+    reduced:'Наклон на паузе, пока включено «Меньше эффектов».',suspended:''
   };
-  $('#tilt-status').textContent=messages[tiltStatus]??'';
+  $('#tilt-status').textContent=tiltWanted?(messages[status]??''):'';
 }
-$('#tilt').addEventListener('click',()=>{
-  if(['listening','granted','no-data'].includes(tiltStatus)) {
-    tiltWanted=false;deviceLighting.disable();
-  }else{
-    tiltWanted=true;deviceLighting.enable({userGesture:true});
-  }
+$('#tilt').addEventListener('change',event=>{
+  tiltWanted=event.target.checked;
   storage.set('tilt',String(tiltWanted));
+  if(tiltWanted) deviceLighting.enable({userGesture:true});
+  else deviceLighting.disable();
+  updateTilt();
 });
+$('#tilt-permission').addEventListener('click',()=>deviceLighting.enable({userGesture:true}));
 $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);

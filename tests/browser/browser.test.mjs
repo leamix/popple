@@ -396,7 +396,9 @@ try {
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
     const p=await center(tilt);await tilt.mouse.move(p.x,p.y);await tilt.mouse.down();await waitPopped(tilt);await tilt.mouse.up();
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
-    await tilt.locator('#settings-open').click();await tilt.locator('#tilt').click();
+    await tilt.locator('#settings-open').click();
+    assert.equal(await tilt.locator('#tilt').isChecked(),true);
+    await tilt.locator('#tilt-permission').click();
     assert.equal(await tilt.evaluate(()=>__permissionCalls),1);await tilt.locator('#settings-close').click();
     await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:355,beta:40,gamma:0});window.dispatchEvent(event);});
     await tilt.waitForTimeout(150);
@@ -407,13 +409,66 @@ try {
     }
     await tilt.waitForTimeout(450);
     const shifted=await tilt.evaluate(()=>({...__lastLight}));
-    assert.ok(Math.hypot(shifted.x,shifted.y)>.015&&Math.hypot(shifted.x,shifted.y)<=.085);
-    assert.ok(Math.hypot(shifted.x-initial.x,shifted.y-initial.y)>.015);assert.equal(await count(tilt),1);
+    assert.ok(Math.hypot(shifted.x,shifted.y)>.03&&Math.hypot(shifted.x,shifted.y)<=.17);
+    assert.ok(Math.hypot(shifted.x-initial.x,shifted.y-initial.y)>.03);assert.equal(await count(tilt),1);
     await screenshot(tilt,'mobile-tilt-dark.png');await tilt.locator('#theme').click();await tilt.waitForTimeout(150);await screenshot(tilt,'mobile-tilt-light.png');
     await tilt.locator('#settings-open').click();await tilt.locator('#motion').check();await tilt.waitForTimeout(120);
-    assert.deepEqual(await tilt.evaluate(()=>({...__lastLight})),{x:0,y:0});assert.equal(await tilt.locator('#tilt').isDisabled(),true);
+    assert.deepEqual(await tilt.evaluate(()=>({...__lastLight})),{x:0,y:0});
+    assert.equal(await tilt.locator('#tilt').isChecked(),true);
+    assert.equal(await tilt.locator('#tilt').isDisabled(),false);
+    await tilt.locator('#motion').uncheck();
     await tilt.locator('#settings-close').click();
     return {initial,shifted,permissionCalls:1};
+  });
+  await check('tilt switch preserves both choices on reload and reuses granted sensor events without a prompt',async()=>{
+    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length===14);
+    await tilt.locator('#settings-open').click();
+    assert.equal(await tilt.locator('#tilt').getAttribute('role'),'switch');
+    assert.equal(await tilt.locator('#tilt').isChecked(),true);
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
+    assert.equal(await tilt.locator('#tilt-permission').isVisible(),true);
+    await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:0,beta:30,gamma:0});window.dispatchEvent(event);});
+    assert.equal(await tilt.locator('#tilt-permission').isVisible(),false);
+    for(let i=0;i<12;i++){
+      await tilt.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:20,beta:58,gamma:26});window.dispatchEvent(event);});
+      await tilt.waitForTimeout(35);
+    }
+    await tilt.waitForTimeout(350);
+    assert.ok(await tilt.evaluate(()=>Math.hypot(__lastLight.x,__lastLight.y)>.035));
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
+    await tilt.locator('#tilt').uncheck();
+    assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');
+    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length===14);
+    await tilt.locator('#settings-open').click();
+    assert.equal(await tilt.locator('#tilt').isChecked(),false);
+    assert.equal(await tilt.locator('#tilt-permission').isVisible(),false);
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
+    await tilt.locator('#tilt').check();
+    assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'true');
+    assert.equal(await tilt.evaluate(()=>__permissionCalls),1);
+    await tilt.waitForTimeout(250);
+    await screenshot(tilt,'mobile-settings-tilt-on.png');
+    await tilt.locator('#settings-close').click();
+  });
+  await check('native permission blur keeps switch pending and a denial restores its retry action',async()=>{
+    const {page:prompt}=await context({viewport:{width:390,height:844},initScript:()=>{
+      Object.defineProperty(window,'DeviceOrientationEvent',{configurable:true,value:class extends Event {
+        static requestPermission(){return new Promise(resolve=>window.__resolvePermission=resolve);}
+      }});
+    }});
+    await prompt.locator('#settings-open').click();await prompt.locator('#tilt-permission').click();
+    await prompt.evaluate(()=>window.dispatchEvent(new Event('blur')));
+    assert.equal(await prompt.locator('#tilt').isChecked(),true);
+    assert.equal(await prompt.locator('#tilt').isDisabled(),true);
+    assert.match(await prompt.locator('#tilt-status').textContent(),/Ждём разрешения/);
+    await prompt.evaluate(()=>__resolvePermission('denied'));
+    assert.equal(await prompt.locator('#tilt').isDisabled(),false);
+    assert.equal(await prompt.locator('#tilt-permission').isVisible(),true);
+    assert.match(await prompt.locator('#tilt-status').textContent(),/Доступ к движению закрыт/);
+    await prompt.locator('#tilt-permission').click();
+    await prompt.evaluate(()=>__resolvePermission('granted'));
+    assert.equal(await prompt.locator('#tilt').isDisabled(),false);
+    assert.equal(await prompt.locator('#tilt-permission').isVisible(),false);
   });
   await check('final reloaded renderer screenshots and all-popped frame sample', async () => {
     await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);
@@ -546,6 +601,28 @@ async function runWebKitSmoke() {
       await page.locator('#settings-open').tap(); await page.locator('#size').fill('100');
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await inspectStaggeredLayout(page);
+    });
+    await check('native tilt switch saves on and off without automatic permission prompts', async () => {
+      await page.locator('#settings-close').tap();
+      await page.addInitScript(()=>{
+        window.__permissionCalls=0;
+        Object.defineProperty(window,'DeviceOrientationEvent',{configurable:true,value:class extends Event {static async requestPermission(){window.__permissionCalls++;return 'granted';}}});
+      });
+      await page.reload();await page.locator('#settings-open').tap();
+      assert.equal(await page.locator('#tilt').isChecked(),true);
+      assert.equal(await page.evaluate(()=>__permissionCalls),0);
+      await page.locator('#tilt-permission').tap();
+      assert.equal(await page.evaluate(()=>__permissionCalls),1);
+      await page.reload();await page.locator('#settings-open').tap();
+      assert.equal(await page.locator('#tilt').isChecked(),true);
+      assert.equal(await page.evaluate(()=>__permissionCalls),0);
+      await page.evaluate(()=>{const event=new Event('deviceorientation');Object.assign(event,{alpha:0,beta:30,gamma:0});window.dispatchEvent(event);});
+      assert.equal(await page.locator('#tilt-permission').isVisible(),false);
+      await page.locator('#tilt').uncheck();
+      await page.reload();await page.locator('#settings-open').tap();
+      assert.equal(await page.locator('#tilt').isChecked(),false);
+      assert.equal(await page.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');
+      assert.equal(await page.evaluate(()=>__permissionCalls),0);
     });
     await check('no runtime or console errors', async () => assert.deepEqual(results.errors, []));
   } finally {
