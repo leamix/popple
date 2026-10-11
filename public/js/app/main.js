@@ -53,6 +53,7 @@ function tick(ms) {
     const b=bubbles[i];
     if(b.step(dt,now)) {
       const p=layout[i];
+      audio.rubbing.setMaterial(i,true);
       audio.pop();
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
@@ -75,6 +76,7 @@ function tick(ms) {
   if(active||bursting||now<animateUntil) frame=requestAnimationFrame(tick);
 }
 function cancelBubble(index) {
+  audio.rubbing.end(index);
   for(const [pointerId,owner] of pointers) if(owner===index) {
     pointers.delete(pointerId);
     if(buttons[index].hasPointerCapture(pointerId)) buttons[index].releasePointerCapture(pointerId);
@@ -84,6 +86,7 @@ function cancelBubble(index) {
 }
 function cancelAll() {
   bubbles.forEach((_,index)=>cancelBubble(index));
+  audio.rubbing.stopAll();
   wake();
 }
 function resize() {
@@ -121,7 +124,9 @@ buttons.forEach((button,i)=>{
     const p=coordinates(event,i);
     if(Math.hypot(p.x,p.y)>1.08)return;
     pointers.set(event.pointerId,i);button.setPointerCapture(event.pointerId);
-    bubbles[i].press(p.x,p.y,event.pressure,performance.now()/1000);wake();
+    const now=performance.now()/1000;
+    bubbles[i].press(p.x,p.y,event.pressure,now);
+    audio.rubbing.begin(i,{...p,popped:bubbles[i].popped,pan:event.clientX/innerWidth*2-1},now);wake();
   });
   button.addEventListener('pointermove',event=>{
     if(pointers.get(event.pointerId)!==i)return;
@@ -129,11 +134,12 @@ buttons.forEach((button,i)=>{
     if(Math.hypot(p.x,p.y)>1.35) {
       cancelBubble(i);wake();return;
     }
-    bubbles[i].move(p.x,p.y,event.pressure);wake();
+    bubbles[i].move(p.x,p.y,event.pressure);
+    audio.rubbing.move(i,{...p,popped:bubbles[i].popped,pan:event.clientX/innerWidth*2-1},performance.now()/1000);wake();
   });
   const release=event=>{
     if(pointers.get(event.pointerId)!==i)return;
-    pointers.delete(event.pointerId);bubbles[i].release();wake();
+    pointers.delete(event.pointerId);audio.rubbing.end(i);bubbles[i].release();wake();
   };
   button.addEventListener('pointerup',event=>{audio.unlock();release(event);});
   button.addEventListener('pointercancel',release);button.addEventListener('lostpointercapture',release);
@@ -256,6 +262,7 @@ $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));
 window.addEventListener('resize',resize);
 window.addEventListener('blur',cancelAll);
+window.addEventListener('pagehide',cancelAll);
 document.addEventListener('visibilitychange',()=>{
   cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else wake();
 });
