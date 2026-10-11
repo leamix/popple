@@ -58,7 +58,7 @@ test('both surfaces stay finite, quiet and bounded at device sample rates', () =
       assert.ok(sound.duration >= 3 && sound.duration <= 5);
       assert.equal(sound.duration, sound.samples.length / sampleRate);
       assert.ok(measured.peak <= .56001, `${material} peak ${measured.peak}`);
-      const range = material === 'intact' ? [.045, .065] : [.035, .065];
+      const range = material === 'intact' ? [.045, .065] : [.025, .05];
       assert.ok(measured.rms >= range[0] && measured.rms <= range[1], `${material} rms ${measured.rms}`);
     }
   }

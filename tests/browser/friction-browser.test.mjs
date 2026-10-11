@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const output = path.join(root, 'artifacts');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
+const checkFilter = process.argv.find(arg => arg.startsWith('--check='))?.slice('--check='.length);
 await mkdir(output, { recursive: true });
 
 // Reuse packages and browser binaries already present; never install anything.
@@ -70,6 +71,7 @@ async function context(options = {}, targetBrowser = browser) {
   return { ctx, page };
 }
 async function check(name, action) {
+  if (checkFilter && !name.includes(checkFilter)) return;
   try {
     const details = await action();
     report.checks.push({ name, status: 'passed', ...(details === undefined ? {} : { details }) });
@@ -167,6 +169,53 @@ async function saveWave(filename, { base64, channels, sampleRate }) {
   header.writeUInt16LE(channels * 2, 32); header.writeUInt16LE(16, 34); header.write('data', 36); header.writeUInt32LE(pcm.length, 40);
   await writeFile(path.join(output, filename), Buffer.concat([header, pcm]));
 }
+async function ruptureScenario(initialMotion, targetBrowser = browser) {
+  const { page: transition } = await context({ hold: .35 }, targetBrowser);
+  await transition.evaluate(() => {
+    const player = __rubAudio.rubbing, createVoice = player.createVoice;
+    globalThis.__rubVoiceStarts = [];
+    player.createVoice = function(contact) {
+      __rubVoiceStarts.push({ material: contact.material, time: __rubAudio.context.currentTime });
+      return createVoice.call(this, contact);
+    };
+  });
+  const point = await begin(transition);
+  if (initialMotion === 'moving') await stroke(transition, point, 16);
+  await transition.waitForFunction(() => __bubbleStates[4].popped);
+  // A held finger can report pressure changes and tiny position jitter after
+  // the haptic pulse. It still belongs to the gesture which caused the pop.
+  for (const [offset, pressure] of [[.35, .49], [-.35, .51], [.5, .5]]) {
+    await transition.locator('.bubble-target').nth(4).dispatchEvent('pointermove', {
+      pointerId: 1, pointerType: 'mouse', buttons: 1, pressure,
+      clientX: point.x + offset, clientY: point.y,
+    });
+    await transition.waitForTimeout(18);
+  }
+  const earlyPoppedVoices = await transition.evaluate(() => __rubVoiceStarts.filter(voice => voice.material === 'popped').length);
+  // Exclude the intentionally retained pop transient before asking the output
+  // analyser to establish silence for further movement of the same pointer.
+  await transition.waitForFunction(() => __rubAudio.sources.size === 0);
+  await transition.waitForTimeout(390);
+  await clearProbe(transition);
+  await stroke(transition, point, 8);
+  const sameGesture = await measurement(transition);
+  const postPopVoices = await transition.evaluate(() => __rubVoiceStarts.filter(voice => voice.material === 'popped').length);
+  await transition.mouse.up();
+  await settled(transition);
+  const nextPoint = await begin(transition);
+  await clearProbe(transition);
+  await stroke(transition, nextPoint, 8);
+  const newGesture = await measurement(transition);
+  assertAudible(newGesture, 'fresh press on collapsed film');
+  assert.deepEqual([...new Set((await state(transition)).voiceMaterials)], ['popped']);
+  assert.equal((await state(transition)).popped, 1);
+  await transition.mouse.up();
+  await settled(transition);
+  assert.equal(earlyPoppedVoices, 0, `${initialMotion}: held post-pop pointer must not start collapsed-film voices, including pressure/position jitter`);
+  assert.equal(postPopVoices, 0, `${initialMotion}: further movement needs release and a fresh press before rustling`);
+  assert.ok(sameGesture.maxRms < 1e-7, `${initialMotion}: same post-pop gesture should be silent after the pop tail, RMS ${sameGesture.maxRms}`);
+  return { initialMotion, earlyPoppedVoices, postPopVoices, sameGesture, newGesture };
+}
 
 try {
   const { page } = await context();
@@ -226,22 +275,9 @@ try {
     await settled(page);
     return stats;
   });
-  await check('same owned drag changes to rough material after one pop', async () => {
-    const { page: transition } = await context({ hold: .35 });
-    const point = await begin(transition);
-    await stroke(transition, point, 25);
-    await transition.waitForFunction(() => __bubbleStates[4].popped);
-    assert.deepEqual((await state(transition)).materials, ['popped']);
-    await clearProbe(transition);
-    await stroke(transition, point, 12);
-    const stats = await measurement(transition);
-    assertAudible(stats, 'popped');
-    assert.equal((await state(transition)).popped, 1);
-    assert.deepEqual([...new Set((await state(transition)).voiceMaterials)], ['popped']);
-    await transition.mouse.up();
-    await settled(transition);
-    return stats;
-  });
+  for (const initialMotion of ['stationary', 'moving']) {
+    await check(`rupture ends ${initialMotion} pointer sound until a fresh press`, () => ruptureScenario(initialMotion));
+  }
   await check('default-hold short strokes begin at creak cues and generate a live unnormalized preview', async () => {
     const { page: short } = await context({ hold: .78 });
     await begin(short, 8);
@@ -451,7 +487,9 @@ try {
       assertAudible(stats, 'WebKit');
       await safari.mouse.up();
       await settled(safari);
-      return stats;
+      const rupture = [];
+      for (const initialMotion of ['stationary', 'moving']) rupture.push(await ruptureScenario(initialMotion, webkitBrowser));
+      return { ...stats, rupture };
     });
     if (webkitBrowser) await webkitBrowser.close();
   } else report.limitations.push('No installed matching WebKit package was found; WebKit was skipped.');
@@ -460,7 +498,7 @@ try {
   await Promise.allSettled(contexts.map(ctx => ctx.close()));
   await browser.close();
   report.summary = { passed: report.checks.filter(check => check.status === 'passed').length, failed: report.checks.filter(check => check.status === 'failed').length };
-  await writeFile(path.join(output, 'friction-browser-report.json'), JSON.stringify(report, null, 2) + '\n');
+  await writeFile(path.join(output, checkFilter ? 'friction-browser-filtered-report.json' : 'friction-browser-report.json'), JSON.stringify(report, null, 2) + '\n');
 }
 console.log(JSON.stringify(report.summary));
 if (report.summary.failed) process.exitCode = 1;

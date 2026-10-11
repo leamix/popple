@@ -13,6 +13,7 @@ const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
 const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i,savedHold));
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
+const playground=$('.playground');
 const pointers=new Map();
 const activationTimers=new Map();
 const keyboardOwners=new Map();
@@ -53,14 +54,15 @@ function tick(ms) {
     const b=bubbles[i];
     if(b.step(dt,now)) {
       const p=layout[i];
-      audio.rubbing.setMaterial(i,true);
+      // Rupture ends this sound gesture. The held finger may keep deforming
+      // the film, but rubbing resumes only after release and a fresh touch.
+      audio.rubbing.end(i);
       audio.pop();
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
       buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул. Можно помять плёнку`);
       const count=bubbles.filter(b=>b.popped).length;
       $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
-      $('#caption').textContent=count===bubbles.length?'Вся плёнка твоя. Возьмём ещё?':'Вот и всё. Можно ещё один.';
       animateUntil=now+1.1;
       if(navigator.vibrate&&!reduced) navigator.vibrate(12);
     }
@@ -117,7 +119,6 @@ function coordinates(event,index) {
   return {x:(event.clientX-rect.left-p.x)/p.radius,y:(event.clientY-rect.top-p.y)/p.radius};
 }
 buttons.forEach((button,i)=>{
-  button.addEventListener('contextmenu',event=>event.preventDefault());
   button.addEventListener('pointerdown',event=>{
     if(event.button!==0||bubbles[i].active) return;
     event.preventDefault();audio.unlock();
@@ -169,6 +170,11 @@ buttons.forEach((button,i)=>{
 });
 document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
 document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
+// `touch-action` covers modern engines; preventDefault is the fallback for
+// browsers that still offer search, translate, or scroll gestures mid-drag.
+playground.addEventListener('touchmove',event=>event.preventDefault(),{passive:false});
+playground.addEventListener('gesturestart',event=>event.preventDefault());
+playground.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('pointermove',event=>{
   if(event.pointerType==='touch'||reduced||deviceLighting.hasData)return;
   lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055,angle:0};wake(.55);
@@ -179,8 +185,7 @@ $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();}
 $('#reset').addEventListener('click',()=>{
   audio.unlock();cancelAll();effects.clear();
   bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
-  buttons.forEach((button,i)=>{button.dataset.popped='false';button.removeAttribute('aria-disabled');button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
-  $('#caption').textContent='Свежая плёнка. Весь день впереди.';
+  buttons.forEach((button,i)=>{button.dataset.popped='false';button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
   $('#announcement').textContent=`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 });
 audio.setEnabled(storage.get('sound','true')==='true');
@@ -229,7 +234,7 @@ settings.addEventListener('close',()=>{
   $('#settings-open').focus({preventScroll:true});
 });
 function updateTilt() {
-  // The switch reflects the saved choice; the caption reflects actual access.
+  // The switch reflects the saved choice; the status text reflects actual access.
   $('#tilt').checked=tiltWanted;
   $('#tilt').disabled=deviceLighting.pending;
   const status=deviceLighting.pending?'pending':tiltStatus;

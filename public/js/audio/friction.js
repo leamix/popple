@@ -234,8 +234,9 @@ export function synthesizeFriction(sampleRate, seed, material = 'intact', { incl
     foldEvents.length = 0;
     matchRms(squeak, .052);
   }
-  // Match the surfaces' playback levels without changing either texture.
-  const outputGain = popped ? .624 : 1.15;
+  // Independent playback levels keep the collapsed rustle quiet without
+  // changing either texture.
+  const outputGain = popped ? .4368 : 1.15;
   const samples = new Float32Array(length);
   for (let i = 0; i < length; i++) {
     if (!popped) {

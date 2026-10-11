@@ -215,6 +215,13 @@ try {
     await screenshot(page, 'desktop-dark.png');
     return inspectStaggeredLayout(page);
   });
+  await check('film keeps progress announcements for assistive technology without visual status copy', async () => {
+    assert.equal(await page.locator('.below-film').count(), 0);
+    assert.equal(await page.locator('#announcement').getAttribute('aria-live'), 'polite');
+    assert.equal(await page.locator('#announcement').getAttribute('class'), 'sr-only');
+    const box = await page.locator('#announcement').boundingBox();
+    assert.ok(box.width <= 1 && box.height <= 1);
+  });
   await check('short real mouse click does not pop later', async () => {
     const p = await center(page);
     await page.mouse.click(p.x, p.y, { delay: 75 });
@@ -400,6 +407,14 @@ try {
   await check('mobile touch tap does not pop after release', async () => {
     const p = await center(mobile); await mobile.touchscreen.tap(p.x, p.y);
     await mobile.waitForTimeout(950); assert.equal(await count(mobile), 0);
+  });
+  await check('moving a touch from the film suppresses the browser default gesture', async () => {
+    const prevented = await mobile.locator('.bubble-target').nth(4).evaluate(target => {
+      const event = new Event('touchmove', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    assert.equal(prevented, true);
   });
   await check('two simultaneous touches independently pop two pockets', async () => {
     const a = await center(mobile, 3), b = await center(mobile, 5);
