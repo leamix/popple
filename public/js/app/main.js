@@ -5,6 +5,10 @@ import { BUBBLE_COUNT, createBubbleLayout } from './layout.js';
 import { DeviceLighting } from './lighting.js';
 
 const $ = selector => document.querySelector(selector);
+const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
+document.addEventListener('pointerdown',markPointerInput,{capture:true,passive:true});
+document.addEventListener('touchstart',markPointerInput,{capture:true,passive:true});
+document.addEventListener('keydown',()=>{document.documentElement.dataset.inputModality='keyboard';},{capture:true});
 const storage = {
   get(key, fallback) { try { return localStorage.getItem('bubble.'+key) ?? fallback; } catch { return fallback; } },
   set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }

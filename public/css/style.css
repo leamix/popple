@@ -43,6 +43,7 @@ html[data-theme="light"] .sheet::after { opacity: 0; }
 .bubble-haptic { position: absolute; margin: 0; opacity: 0; z-index: 1; clip-path: circle(50%); touch-action: none; cursor: pointer; }
 html[data-reduced="true"] .bubble-haptic { pointer-events: none; }
 .bubble-target:focus-visible { outline-offset: 8px; }
+html[data-input-modality="pointer"] .bubble-target:focus-visible { outline: none; }
 .bubble-target[data-popped="true"] { cursor: grab; }
 .bubble-target[data-popped="true"]:active { cursor: grabbing; }
 .controls { display: flex; align-items: center; gap: 12px; }
