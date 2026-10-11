@@ -13,7 +13,7 @@
   --icon-swap-ease: ease-in-out;
 }
 * { box-sizing: border-box; }
-html { min-height: 100%; background: var(--bg); }
+html { min-height: 100%; background: var(--bg); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 html[data-theme="light"] { color-scheme: light; --bg: #dcebf4; --text: #273942; --muted: #536b78; --line: #36576b28; --surface: #ffffff60; --accent: #426948; --panel: #edf5fa; }
 body { margin: 0; min-width: 280px; min-height: 100svh; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; background: radial-gradient(ellipse at 50% 44%, #17202755, transparent 60%); }
 html[data-theme="light"] body { background: radial-gradient(ellipse at 50% 44%, #ffffff28, transparent 65%); }
@@ -30,7 +30,7 @@ main { display: flex; flex-direction: column; align-items: center; padding: 13px
 .intro { text-align: center; padding: 0 20px; }
 .eyebrow { margin: 0 0 17px; color: var(--muted); letter-spacing: 2.6px; font-size: 9px; font-weight: 500; }
 h1 { margin: 0; font-size: clamp(30px, 4.4vw, 42px); font-weight: 450; line-height: 1.18; letter-spacing: -1.8px; }
-.playground { position: relative; width: 360px; height: 360px; margin: 23px 0 0; flex-shrink: 0; isolation: isolate; }
+.playground { position: relative; width: 360px; height: 360px; margin: 23px 0 0; flex-shrink: 0; isolation: isolate; touch-action: none; }
 .sheet { position: absolute; inset: 21px; border-radius: 17px 13px 19px 14px; background: linear-gradient(125deg, #dae8ed08, #c4dae203 37%, #cadce605 62%, #e5f6fd08); box-shadow: inset 0 0 0 .5px #e8f4ff18, 1px 3px 8px #00000025, inset 0 0 9px #ffffff03; transform: rotate(-1.1deg); }
 .sheet::after { content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: .20; background: repeating-linear-gradient(174deg, transparent 0 33px, #bbc9d008 34px, transparent 36px 52px), repeating-linear-gradient(87deg, transparent 0 67px, #e4efff12 68px, transparent 69px 97px); }
 html[data-theme="light"] .sheet { background: linear-gradient(125deg,#ffffff03,#bdcfdb01 38%,#ffffff08); box-shadow: inset 0 0 0 .5px #ffffff70, 1px 2px 3px #4765790c; }

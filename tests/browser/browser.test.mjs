@@ -340,7 +340,7 @@ try {
     assert.equal(await count(mobile), 2); await mobile.waitForTimeout(300);
     await screenshot(mobile, 'mobile-dark-popped.png');
   });
-  await check('two fingers can knead popped film', async () => {
+  await check('two fingers can knead popped film without selecting page text', async () => {
     const a=await center(mobile,3),b=await center(mobile,5);
     const announcement=await mobile.locator('#announcement').textContent();
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{...a,id:1,force:.5},{...b,id:2,force:.5}]});
@@ -349,7 +349,10 @@ try {
     await mobile.waitForTimeout(200);
     const states=await mobile.evaluate(()=>[3,5].map(i=>({compression:__bubbleStates[i].compression,active:__bubbleStates[i].active,bulge:__bubbleStates[i].bulge})));
     assert.ok(states.every(b=>b.active&&b.compression>.12&&b.bulge===0));
+    assert.equal(await mobile.evaluate(()=>String(getSelection())), '');
     assert.equal(await mobile.locator('#announcement').textContent(),announcement);assert.equal(await count(mobile),2);
+    assert.equal(await mobile.evaluate(()=>{const event=new Event('selectstart',{bubbles:true,cancelable:true});document.querySelector('h1').dispatchEvent(event);return event.defaultPrevented;}),true);
+    assert.equal(await mobile.locator('h1').evaluate(el=>getComputedStyle(el).userSelect),'none');
     await screenshot(mobile,'mobile-popped-kneading.png');
     await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await reset(mobile);
   });

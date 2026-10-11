@@ -166,6 +166,8 @@ document.addEventListener('pointermove',event=>{
   if(event.pointerType==='touch'||reduced||deviceLighting.hasData)return;
   lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055};wake(.55);
 },{passive:true});
+document.addEventListener('selectstart',event=>event.preventDefault());
+document.addEventListener('dragstart',event=>event.preventDefault());
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
 $('#reset').addEventListener('click',()=>{
   audio.unlock();cancelAll();effects.clear();
