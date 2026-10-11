@@ -13,6 +13,19 @@ const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
 const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i,savedHold));
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
+function chooseBrandAccent() {
+  let previous=-1;
+  try {
+    const saved=sessionStorage.getItem('bubble.brandAccent');
+    if(saved!==null)previous=Number(saved);
+  } catch { /* Storage may be unavailable. */ }
+  if(!Number.isInteger(previous)||previous<0||previous>3)previous=-1;
+  const choice=Math.floor(Math.random()*(previous===-1?4:3));
+  const kind=previous===-1||choice<previous?choice:choice+1;
+  try { sessionStorage.setItem('bubble.brandAccent',String(kind)); } catch { /* Keep the current accent. */ }
+  return kind;
+}
+const brandAccent=chooseBrandAccent();
 const playground=$('.playground');
 const pointers=new Map();
 const rawTouchEvents='ontouchstart' in window;
@@ -123,6 +136,7 @@ function resize() {
 }
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
+  effects.drawBrandAccent($('#brand-accent'),brandAccent,dark);
   $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
   $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';

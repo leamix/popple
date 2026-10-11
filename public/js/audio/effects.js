@@ -226,15 +226,35 @@ export class BurstLayer {
         ctx.fillStyle = burst.dark ? '#f4df9b' : '#f6cd64';
         ctx.lineWidth = 1.15;
 
-        if (ray.kind === 0) this.dart(ctx, ray);
-        else if (ray.kind === 1) this.lightning(ctx, ray);
-        else if (ray.kind === 2) this.strokes(ctx, burst.dark, ray);
-        else this.star(ctx, burst.dark, local, ray);
+        this.drawAccent(ctx, ray.kind, burst.dark, local, ray);
         ctx.restore();
       }
       ctx.restore();
     }
     return this.bursts.length > 0;
+  }
+
+  drawAccent(ctx, kind, dark, progress, ray) {
+    if (kind === 0) this.dart(ctx, ray);
+    else if (kind === 1) this.lightning(ctx, ray);
+    else if (kind === 2) this.strokes(ctx, dark, ray);
+    else this.star(ctx, dark, progress, ray);
+  }
+
+  drawBrandAccent(canvas, kind, dark) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 3);
+    canvas.width = Math.round(32 * dpr);
+    canvas.height = Math.round(32 * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(kind === 3 ? 9 : 4, kind === 0 ? 20 : 16);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = dark ? '#161b20' : '#293c4a';
+    ctx.fillStyle = dark ? '#f4df9b' : '#f6cd64';
+    ctx.lineWidth = 1.15;
+    this.drawAccent(ctx, kind, dark, 0, { bend: 1, strokeCount: 3, detail: false, turn: 0 });
   }
 
   dart(ctx, ray) {
