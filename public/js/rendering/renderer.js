@@ -185,6 +185,19 @@ float sheetMask(vec2 pixel) {
   // the browser edge, never in a smaller rounded rectangle inside the scene.
   return 1.;
 }
+vec2 transmittedPool(vec2 q, vec2 exitDirection, float collapse, float identity) {
+  float along=dot(q,exitDirection), across=dot(q,vec2(-exitDirection.y,exitDirection.x));
+  float jitter=.035*sin(identity*2.4);
+  // Filled light pools start at the contact itself and spread across the sheet.
+  // Their broad tails are not restricted to an annulus or the pocket viewport.
+  float core=exp(-sq((along-1.02+.08*across*across)/.18)-sq((across-jitter)/.52));
+  float spread=exp(-sq((along-1.12)/mix(.55,.48,u_dark))-sq((across-jitter*.5)/mix(.82,.72,u_dark)));
+  float light=core*mix(.30,.18,u_dark)+spread*mix(.50,.13,u_dark);
+  // An offset, wider shadow supports the pocket beside the illuminated patch;
+  // putting a dark stripe through its centre would cancel light on pale backing.
+  float shade=exp(-sq((along-.98)/.30)-sq((across+.56)/.50))*mix(.12,.07,u_dark);
+  return vec2(light,shade)*(1.-collapse*.55);
+}
 void drawSheet() {
   vec2 pixel=(v_uv*vec2(.5,-.5)+.5)*u_resolution;
   // Coordinates follow the pocket scale rather than the viewport aspect ratio.
@@ -197,7 +210,7 @@ void drawSheet() {
   slope+=k3*.021*cos(dot(p,k3)+1.8);
   vec2 k4=vec2(7.1,9.7);
   slope+=k4*.006*cos(dot(p,k4)+.65*sin(dot(p,k2)));
-  float exposed=1.,contact=0.,castShadow=0.,bounce=0.,nearFilm=0.;
+  float exposed=1.,contact=0.,castShadow=0.,bounce=0.,nearFilm=0.,pool=0.,poolShade=0.;
   vec2 exitDirection=-keyDirection();
   for(int i=0;i<${BUBBLE_COUNT};i++) {
     vec2 q=(pixel-u_sites[i].xy)*vec2(1.,-1.)/u_sites[i].z;
@@ -215,7 +228,12 @@ void drawSheet() {
     float shadowSide=.25+.75*max(0.,dot(direction,normalize(shadowOffset)));
     castShadow=max(castShadow,exp(-sq((shadowDistance-1.07)/.14))*shadowSide*(1.-c*.52));
     bounce=max(bounce,shoulder*pow(max(0.,dot(direction,exitDirection)),5.)*irregular);
-    exposed*=smoothstep(.96,1.08,distance);
+    if(distance<3.) {
+      vec2 transmitted=transmittedPool(q,exitDirection,c,float(i));
+      // Overlapping patches stay local instead of adding an opaque white haze.
+      pool=max(pool,transmitted.x);poolShade=max(poolShade,transmitted.y);
+    }
+    exposed*=smoothstep(.995,1.025,distance);
   }
   vec3 normal=normalize(vec3(-slope,1.));
   vec3 reflected=reflect(vec3(0.,0.,-1.),normal);
@@ -230,9 +248,10 @@ void drawSheet() {
   vec3 spec=(env/(1.+env))*mix(.035,.065,u_dark);
   spec+=vec3(.88,.94,1.)*(window*.012+windowCore*mix(.08,.045,u_dark))*texture;
   spec+=vec3(.78,.88,1.)*bounce*mix(.045,.22,u_dark);
+  spec+=vec3(pool);
   spec=(1.-exp(-spec*1.35))*exposed*(.25+.75*nearFilm);
   float darkReflection=box(uv+vec2(.42,-.15),vec2(.22,.65),.19)*.025;
-  float shadow=(contact*mix(.05,.11,u_dark)+castShadow*mix(.030,.08,u_dark)+darkReflection)*exposed;
+  float shadow=(contact*mix(.05,.11,u_dark)+castShadow*mix(.030,.08,u_dark)+darkReflection+poolShade)*exposed;
   float specMax=max(spec.r,max(spec.g,spec.b));
   float alpha=specMax+shadow*(1.-specMax);
   vec3 shadowTint=mix(vec3(.24,.26,.32),vec3(.009,.014,.019),u_dark);
@@ -320,18 +339,6 @@ void main() {
   float alpha=clamp(specMax+(coat+shadowA)*(1.-specMax),0.,1.);
   float transmissionLight=mix(.79+shade*.25,.92+shade*.08,u_dark);
   vec3 premul=spec+bg*coat*(1.-specMax)*transmissionLight;
-  // A little light spills through each curved pocket onto the connected film.
-  // Its position/strength vary with the pocket, and relax as the pocket vents.
-  vec2 spillDirection=exitDirection;
-  float along=dot(p,spillDirection), across=dot(p,vec2(-spillDirection.y,spillDirection.x));
-  float bend=along-1.12+.28*across*across+.018*sin(across*9.+u_seed*12.);
-  float spill=exp(-sq(bend/.028))*exp(-sq((across-(u_seed-.5)*.20)/.46));
-  spill+=exp(-sq(bend/.095))*exp(-sq(across/.53))*.22;
-  vec2 pixel=u_origin+p*vec2(1.,-1.)*u_radius;
-  spill*=smoothstep(1.09,1.13,r)*(1.-smoothstep(1.22,1.29,r))*sheetMask(pixel);
-  spill=clamp(spill*mix(.55,.80,u_seed)*(1.-c*.55)*mix(1.30,.55,u_dark),0.,.98);
-  premul=vec3(spill)+premul*(1.-spill);
-  alpha=spill+alpha*(1.-spill);
   gl_FragColor=vec4(min(premul,vec3(alpha)),alpha);
 }
 `;

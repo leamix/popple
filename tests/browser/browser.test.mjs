@@ -788,6 +788,128 @@ try {
     }
     return samples;
   });
+  await check('transmitted light forms a broad filled footprint attached to the pocket in both themes', async () => {
+    const samples = await page.evaluate(async () => {
+      const { FilmRenderer } = await import('/js/rendering/renderer.js');
+      const renderer = new FilmRenderer(document.createElement('canvas'));
+      const radius = 72, centre = 160, size = 320, target = 4;
+      renderer.resize(size, size, 1);
+      const layout = __filmLayout.map((_, index) => ({
+        x: index === target ? centre : 10000 + index * 300,
+        y: index === target ? centre : 10000,
+        radius,
+      }));
+      const intact = __bubbleStates.map(bubble => ({ ...bubble,
+        seed: .65, x: 0, y: 0, popX: 0, popY: 0,
+        compression: 0, bulge: 0, collapse: 0, popped: false,
+      }));
+      const collapsed = intact.map((bubble, index) => index === target
+        ? { ...bubble, popped: true, collapse: 1 } : { ...bubble });
+      const before = JSON.stringify({ layout, intact, collapsed });
+      const previous = {
+        renderer: __filmRenderer, layout: __filmLayout, dark: __filmDark,
+        time: __filmTime, light: __lastLight,
+        theme: document.documentElement.getAttribute('data-theme'),
+      };
+      const lights = [
+        { name: 'neutral', x: 0, y: 0, angle: 0 },
+        { name: 'tilted', x: .08, y: -.06, angle: .70 },
+      ];
+      const observations = [];
+      const capture = (states, dark, light, backing) => {
+        renderer.render(states, layout, dark, 0, light);
+        const gl = renderer.gl, pixels = new Uint8Array(size * size * 4);
+        gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        if (gl.getError() !== gl.NO_ERROR) throw new Error('Broad footprint WebGL readback failed.');
+        const composited = new Float32Array(size * size * 3);
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          const from = ((size - 1 - y) * size + x) * 4, to = (y * size + x) * 3;
+          const transmission = 1 - pixels[from + 3] / 255;
+          for (let channel = 0; channel < 3; channel++) {
+            composited[to + channel] = pixels[from + channel] + backing[channel] * transmission;
+          }
+        }
+        return composited;
+      };
+      try {
+        for (const dark of [true, false]) {
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          const backing = getComputedStyle(document.querySelector('.sheet')).backgroundColor
+            .match(/[\d.]+/g).slice(0, 3).map(Number);
+          const backingMean = backing.reduce((sum, channel) => sum + channel, 0) / 3;
+          for (const light of lights) {
+            const full = capture(intact, dark, light, backing);
+            const vented = capture(collapsed, dark, light, backing);
+            const positive = new Float32Array(size * size);
+            let changedPixels = 0, positivePixels = 0, poolWeight = 0, poolX = 0, poolY = 0;
+            for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+              const index = y * size + x, offset = index * 3;
+              const dx = x + .5 - centre, dy = y + .5 - centre, distance = Math.hypot(dx, dy) / radius;
+              const brightness = (full[offset] + full[offset + 1] + full[offset + 2]) / 3;
+              const collapsedBrightness = (vented[offset] + vented[offset + 1] + vented[offset + 2]) / 3;
+              positive[index] = brightness - backingMean;
+              if (distance < 1.4 || distance > 2) continue;
+              const difference = (Math.abs(full[offset] - vented[offset]) + Math.abs(full[offset + 1] - vented[offset + 1]) + Math.abs(full[offset + 2] - vented[offset + 2])) / 3;
+              if (difference > 3) changedPixels++;
+              if (positive[index] >= 3) positivePixels++;
+              // Locate the real bright pool, independent of the shader's light
+              // helper or chosen footprint geometry. Collapse isolates light
+              // belonging to the pocket from static background reflections.
+              const weight = positive[index] >= 3 ? Math.max(0, brightness - collapsedBrightness) : 0;
+              poolWeight += weight; poolX += dx * weight; poolY += dy * weight;
+            }
+            const length = Math.hypot(poolX, poolY);
+            const direction = length ? { x: poolX / length, y: poolY / length } : null;
+            const brightSector = new Uint8Array(size * size), queue = [], visited = new Uint8Array(size * size);
+            let contactPixels = 0, connectedOuterPixels = 0;
+            if (direction) {
+              for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+                const index = y * size + x;
+                const dx = x + .5 - centre, dy = y + .5 - centre, distance = Math.hypot(dx, dy) / radius;
+                const alignment = (dx * direction.x + dy * direction.y) / Math.hypot(dx, dy);
+                if (distance < 1.03 || distance > 2 || alignment < Math.cos(Math.PI / 5) || positive[index] < 3) continue;
+                brightSector[index] = 1;
+                if (distance <= 1.08) { contactPixels++; visited[index] = 1; queue.push(index); }
+              }
+              // A visible filled pool must connect to the immediate welded rim;
+              // separate bright marks on either side of a gap cannot pass.
+              for (let head = 0; head < queue.length; head++) {
+                const index = queue[head], x = index % size, y = Math.floor(index / size);
+                const distance = Math.hypot(x + .5 - centre, y + .5 - centre) / radius;
+                if (distance >= 1.4) connectedOuterPixels++;
+                for (const next of [x > 0 ? index - 1 : -1, x < size - 1 ? index + 1 : -1,
+                  y > 0 ? index - size : -1, y < size - 1 ? index + size : -1]) {
+                  if (next < 0 || visited[next] || !brightSector[next]) continue;
+                  visited[next] = 1; queue.push(next);
+                }
+              }
+            }
+            observations.push({ theme: dark ? 'dark' : 'light', light, backing,
+              changedPixels, positivePixels, contactPixels, connectedOuterPixels,
+              pool: poolWeight ? { x: poolX / poolWeight, y: poolY / poolWeight } : null,
+            });
+          }
+        }
+        return { observations, unchangedStateAndGeometry: before === JSON.stringify({ layout, intact, collapsed }) };
+      } finally {
+        window.__filmRenderer = previous.renderer; window.__filmLayout = previous.layout;
+        window.__filmDark = previous.dark; window.__filmTime = previous.time; window.__lastLight = previous.light;
+        if (previous.theme === null) delete document.documentElement.dataset.theme;
+        else document.documentElement.dataset.theme = previous.theme;
+        renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+      }
+    });
+    assert.equal(samples.unchangedStateAndGeometry, true, 'Pixel sampling must preserve geometry and the compared membrane states.');
+    const minimumArea = .03 * Math.PI * 72 * 72;
+    for (const sample of samples.observations) {
+      const details = `${sample.theme} ${sample.light.name}: ${JSON.stringify(sample)}`;
+      assert.ok(sample.changedPixels > minimumArea, `Venting must change a broad footprint beyond 1.4 radii. ${details}`);
+      assert.ok(sample.positivePixels > minimumArea, `The filled footprint must brighten the actual backing over a visible area. ${details}`);
+      assert.ok(sample.contactPixels >= 12, `Transmitted light must reach the immediate rim without a gap. ${details}`);
+      assert.ok(sample.connectedOuterPixels > minimumArea, `The near-rim light must connect continuously to the broad outer pool. ${details}`);
+    }
+    return samples;
+  });
   await check('no application console or runtime errors', async () => assert.deepEqual(report.errors, []));
 
   const matchedWebkit = available.find(item => existsSync(path.join(homedir(), 'Library/Caches/ms-playwright', `webkit-${item.webkitRevision}`)));
