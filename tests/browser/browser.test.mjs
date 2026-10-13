@@ -222,7 +222,10 @@ try {
         height: stage.height,
       };
     });
-    assert.ok(fieldPadding.horizontal >= 64 && fieldPadding.vertical >= 64, 'Wide screens need a generous field margin around the bubbles.');
+    assert.ok(fieldPadding.horizontal >= 64 && fieldPadding.horizontal < 70, 'Desktop keeps a compact horizontal margin around the bubbles.');
+    assert.ok(fieldPadding.vertical >= 64 && fieldPadding.vertical < 70, 'Desktop keeps a compact vertical margin around the bubbles.');
+    assert.equal(await page.locator('#film').evaluate(film => getComputedStyle(film).clipPath !== 'none'), true,
+      'Desktop reflections stay clipped inside the film field.');
     await screenshot(page, 'desktop-dark.png');
     return { fieldPadding, ...await inspectStaggeredLayout(page) };
   });
