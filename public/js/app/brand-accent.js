@@ -32,9 +32,6 @@ export function drawBrandAccent(canvas, kind, dark, dpr = globalThis.devicePixel
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.translate(BRAND_CONFIG.canvasSize / 2, BRAND_CONFIG.canvasSize / 2);
   ctx.scale(BRAND_CONFIG.glyphScale, BRAND_CONFIG.glyphScale);
-  // A glyph's native +Y is its lower side. Rotate it left so that side faces
-  // the wordmark instead of hanging below it.
-  ctx.rotate(Math.PI / 2);
   drawComicSymbol(ctx, kind, dark);
 }
 

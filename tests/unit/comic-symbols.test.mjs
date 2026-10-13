@@ -110,7 +110,7 @@ test('the logo excludes the tiny legacy star while retaining varied non-repeatin
   }
 });
 
-test('the logo glyph points its native lower side left towards the wordmark', () => {
+test('the logo glyph keeps its native lower side facing down', () => {
   assert.ok(brandAccentModule, 'The logo needs an independently loadable accent module.');
   const { BRAND_SYMBOL_INDICES, drawBrandAccent } = brandAccentModule;
   const OriginalPath2D = globalThis.Path2D;
@@ -139,8 +139,8 @@ test('the logo glyph points its native lower side left towards the wordmark', ()
     drawBrandAccent({ getContext() { return context; } }, BRAND_SYMBOL_INDICES[0], true, 1);
     assert.ok(drawings.length > 0, 'The logo symbol should draw immediately on its own canvas.');
     for (const [, , c, d] of drawings) {
-      assert.ok(c < -0.8 && Math.abs(d) < 1e-10,
-        `Native +Y (the lower side) must point left; received (${c}, ${d}).`);
+      assert.ok(Math.abs(c) < 1e-10 && d > 0.8,
+        `Native +Y (the lower side) must still point down; received (${c}, ${d}).`);
     }
   } finally {
     if (OriginalPath2D === undefined) delete globalThis.Path2D;
