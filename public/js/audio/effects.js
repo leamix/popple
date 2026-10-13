@@ -171,12 +171,9 @@ export class BurstLayer {
         kind: kinds[index],
         size: 0.66 + random() * 0.32,
         aspect: 0.88 + random() * 0.24,
-        flip: random() < 0.5 ? -1 : 1,
-        tilt: (random() - 0.5) * 0.55,
         reach: 0.65 + random() * 0.65,
         offset: 5 + random() * 5,
         delay: reducedMotion ? 0 : random() * 0.028,
-        turn: reducedMotion ? 0 : (random() - 0.5) * 0.65,
       };
       angle += (gap / totalGap) * TAU;
       return ray;
@@ -198,7 +195,7 @@ export class BurstLayer {
       const scale = clamp(burst.radius / 40, 0.65, 1.65);
       ctx.save();
       ctx.translate(burst.x, burst.y);
-      // Keep even a rotating doodle outside the popped pocket.
+      // Keep every doodle outside the popped pocket.
       ctx.beginPath();
       ctx.rect(-this.width * 2, -this.height * 2, this.width * 4, this.height * 4);
       ctx.arc(0, 0, burst.radius * 1.045, 0, TAU);
@@ -213,8 +210,10 @@ export class BurstLayer {
         ctx.save();
         ctx.rotate(ray.angle);
         ctx.translate(burst.radius + (ray.offset + 12) * scale + travel, 0);
-        ctx.rotate(ray.tilt + ray.turn * local);
-        ctx.scale(scale * ray.size * appear * ray.aspect, scale * ray.size * appear * ray.flip);
+        // Each glyph's native +Y points back at the pocket. It keeps this
+        // radial facing throughout flight, without random birth tilt or flips.
+        ctx.rotate(Math.PI / 2);
+        ctx.scale(scale * ray.size * appear * ray.aspect, scale * ray.size * appear);
         ctx.globalAlpha = opacity;
         drawComicSymbol(ctx, ray.kind, burst.dark);
         ctx.restore();

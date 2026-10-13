@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { BurstLayer } from '../../public/js/audio/effects.js';
 import { COMIC_SYMBOLS, chooseComicSymbol } from '../../public/js/core/comic-symbols.js';
 
-function createLayer() {
+function createLayer(context = {}) {
   const layer = new BurstLayer({
     style: {},
     setAttribute() {},
-    getContext() { return {}; },
+    getContext() { return context; },
   });
   layer.serial = 42;
   return layer;
@@ -46,7 +46,6 @@ test('reduced motion keeps the symbol variety without animated travel or rotatio
   assert.equal(new Set(burst.rays.map(ray => ray.kind)).size, burst.rays.length);
   for (const ray of burst.rays) {
     assert.equal(ray.delay, 0);
-    assert.equal(ray.turn, 0);
   }
 });
 
@@ -63,5 +62,56 @@ test('reloading can select every other logo symbol without repeating the previou
   for (const previous of [-1, 100, NaN]) {
     assert.equal(chooseComicSymbol(previous, () => 0), 0);
     assert.equal(chooseComicSymbol(previous, () => 0.999), COMIC_SYMBOLS.length - 1);
+  }
+});
+
+test('each glyph faces the bubble radially at appearance and keeps facing it during flight', () => {
+  // Record the real canvas transform at drawing time. Path2D itself only holds
+  // path data; its browser rasterizer is irrelevant to this orientation check.
+  const OriginalPath2D = globalThis.Path2D;
+  globalThis.Path2D = class { constructor(data) { this.data = data; } };
+  try {
+    for (const reducedMotion of [false, true]) for (const radius of [18, 40, 90]) {
+      let matrix = [1, 0, 0, 1, 0, 0];
+      const stack = [], drawings = [];
+      const context = {
+        clearRect() { drawings.length = 0; },
+        save() { stack.push([...matrix]); },
+        restore() { matrix = stack.pop(); },
+        translate(x, y) {
+          const [a, b, c, d, e, f] = matrix;
+          matrix = [a, b, c, d, e + a * x + c * y, f + b * x + d * y];
+        },
+        rotate(angle) {
+          const [a, b, c, d, e, f] = matrix, cosine = Math.cos(angle), sine = Math.sin(angle);
+          matrix = [a * cosine + c * sine, b * cosine + d * sine,
+            c * cosine - a * sine, d * cosine - b * sine, e, f];
+        },
+        scale(x, y) {
+          const [a, b, c, d, e, f] = matrix;
+          matrix = [a * x, b * x, c * y, d * y, e, f];
+        },
+        beginPath() {}, rect() {}, arc() {}, clip() {}, fill() {},
+        stroke() { drawings.push([...matrix]); },
+      };
+      const layer = createLayer(context);
+      layer.serial = radius * 193;
+      layer.burst(312, 208, radius, { reducedMotion });
+      const burst = layer.bursts.at(-1);
+      for (const age of [.035, burst.duration * .8]) {
+        layer.render(burst.start + age);
+        assert.ok(drawings.length >= burst.rays.length, 'Every symbol should have appeared by this sample.');
+        for (const [, , c, d, x, y] of drawings) {
+          const toCentreX = burst.x - x, toCentreY = burst.y - y;
+          const alignment = (c * toCentreX + d * toCentreY) /
+            (Math.hypot(c, d) * Math.hypot(toCentreX, toCentreY));
+          assert.ok(alignment > 1 - 1e-10,
+            `Native glyph +Y must point inward, independent of random placement or motion (alignment=${alignment}).`);
+        }
+      }
+    }
+  } finally {
+    if (OriginalPath2D === undefined) delete globalThis.Path2D;
+    else globalThis.Path2D = OriginalPath2D;
   }
 });
