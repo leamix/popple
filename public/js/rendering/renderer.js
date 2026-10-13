@@ -43,33 +43,14 @@ float heightAt(vec2 p) {
   float r=length(q), a=angleOf(q), c=clamp(u_collapse,0.,1.);
   float edge=1.-smoothstep(.88,1.015,r);
   float dome=(.48+u_seed*.09)*pow(max(0.,1.-r*r),.58+u_seed*.07);
-  // Molded polyethylene is slightly slack and asymmetric even before venting.
-  // Broad kinks bend a window reflection without turning every dome into folds.
+  // An intact pocket stays taut. Gentle molding variation changes its broad
+  // highlight, while visible hinges belong exclusively to the vented skin.
   vec2 stretch=turn(q,u_seed*5.7);
   float slackLine=stretch.y-(u_seed-.5)*.45-(.10+u_seed*.26)*stretch.x*stretch.x;
   float slack=exp(-sq(slackLine/(.14+u_seed*.09)));
   float slackFade=smoothstep(.12,.38,r)*(1.-smoothstep(.75,.99,r));
-  dome+=(slack-.38*exp(-sq((slackLine+.14)/.27)))*(.024+u_seed*.031)*slackFade;
-  dome+=(.018*sin(q.x*5.3+u_seed*15.)*sin(q.y*4.4-u_seed*9.)+.012*dot(q,turn(vec2(1.,0.),u_seed*8.)))*edge;
-  // The molded cap has broad, almost planar stretches between a few hinges.
-  // These seeded creases continue into the vented skin, so the intact material
-  // reads as thin flexible packaging instead of a polished spherical lens.
-  for(int i=0;i<3;i++) {
-    vec4 fold=u_folds[i], profile=u_foldProfile[i];
-    float along=dot(q,fold.xy);
-    float across=dot(q,vec2(-fold.y,fold.x));
-    float line=across-fold.z-profile.y*along*along;
-    float width=.20+fold.w*2.;
-    float length=.36+profile.z*.43;
-    float center=(profile.z-.46)*.85;
-    float acrossDistance=sqrt(line*line+.0001)/width;
-    float alongDistance=sqrt(sq(along-center)+.0001)/length;
-    float distance=.5*(acrossDistance+alongDistance+sqrt(sq(acrossDistance-alongDistance)+.035));
-    float roof=max(0.,1.-distance);
-    roof*=smoothstep(0.,.12,roof);
-    float amplitude=profile.x*(i==1?-.40:.80);
-    dome+=roof*amplitude*edge;
-  }
+  dome+=(slack-.38*exp(-sq((slackLine+.14)/.27)))*(.006+u_seed*.006)*slackFade;
+  dome+=(.005*sin(q.x*5.3+u_seed*15.)*sin(q.y*4.4-u_seed*9.)+.007*dot(q,turn(vec2(1.,0.),u_seed*8.)))*edge;
   float dist=length(q-u_touch*.67);
   float dent=exp(-dist*dist/ (.17+.09*u_compression));
   float opposite=exp(-dot(q+u_touch*.55,q+u_touch*.55)/.28);
@@ -248,7 +229,7 @@ void drawSheet() {
   float texture=.80+.20*noise(p*vec2(6.,9.));
   vec3 spec=(env/(1.+env))*mix(.035,.065,u_dark);
   spec+=vec3(.88,.94,1.)*(window*.012+windowCore*mix(.08,.045,u_dark))*texture;
-  spec+=vec3(.78,.88,1.)*bounce*mix(.045,.11,u_dark);
+  spec+=vec3(.78,.88,1.)*bounce*mix(.045,.22,u_dark);
   spec=(1.-exp(-spec*1.35))*exposed*(.25+.75*nearFilm);
   float darkReflection=box(uv+vec2(.42,-.15),vec2(.22,.65),.19)*.025;
   float shadow=(contact*mix(.05,.11,u_dark)+castShadow*mix(.030,.08,u_dark)+darkReflection)*exposed;
