@@ -274,7 +274,7 @@ $('#sound').addEventListener('click',()=>{
 });
 $('#size').value=diameter;
 $('#size').addEventListener('input',event=>{diameter=Number(event.target.value);storage.set('size',diameter);resize();});
-const holdFormat=new Intl.NumberFormat('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const holdFormat=new Intl.NumberFormat('ru-RU',{minimumFractionDigits:1,maximumFractionDigits:2});
 function updateHold() {
   const duration=bubbles[0].holdDuration;
   $('#hold').value=duration;

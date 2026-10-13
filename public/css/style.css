@@ -30,7 +30,8 @@ button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke
 main { display: flex; flex-direction: column; align-items: center; padding: 13px 0 35px; overflow: hidden; }
 .intro { text-align: center; padding: 0 20px; }
 .eyebrow { margin: 0 0 17px; color: var(--muted); letter-spacing: 2.6px; font-size: 9px; font-weight: 500; }
-h1 { margin: 0; font-size: clamp(30px, 4.4vw, 42px); font-weight: 450; line-height: 1.18; letter-spacing: -1.8px; }
+.intro-title { display: flex; align-items: baseline; justify-content: center; gap: .38em; white-space: nowrap; font-size: clamp(30px, 4.4vw, 42px); font-weight: 450; line-height: 1.18; letter-spacing: -.043em; }
+h1 { margin: 0; font: inherit; }
 .playground { position: relative; width: 360px; height: 360px; margin: 23px 0 0; flex-shrink: 0; isolation: isolate; touch-action: none; overscroll-behavior: none; -webkit-touch-callout: none; }
 .sheet { position: absolute; inset: 21px; border-radius: 17px 13px 19px 14px; background: linear-gradient(125deg, #dae8ed08, #c4dae203 37%, #cadce605 62%, #e5f6fd08); box-shadow: inset 0 0 0 .5px #e8f4ff18, 1px 3px 8px #00000025, inset 0 0 9px #ffffff03; transform: rotate(-1.1deg); }
 .sheet::after { content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: .20; background: repeating-linear-gradient(174deg, transparent 0 33px, #bbc9d008 34px, transparent 36px 52px), repeating-linear-gradient(87deg, transparent 0 67px, #e4efff12 68px, transparent 69px 97px); }
@@ -46,10 +47,10 @@ html[data-reduced="true"] .bubble-haptic { pointer-events: none; }
 html[data-input-modality="pointer"] .bubble-target:focus-visible { outline: none; }
 .bubble-target[data-popped="true"] { cursor: grab; }
 .bubble-target[data-popped="true"]:active { cursor: grabbing; }
-.controls { display: flex; align-items: center; gap: 12px; }
-.reset { display: flex; gap: 10px; align-items: center; justify-content: center; min-height: 44px; padding: 11px 19px; border: 1px solid var(--line); border-radius: 24px; background: var(--surface); font-size: 12px; transition: background 150ms, transform 150ms; }
+.reset { position: relative; display: inline-block; padding: max(0px, calc(21px - .6em)) .4em max(0px, calc(21px - .3em)) 1em; border: 1px solid var(--muted); border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; letter-spacing: inherit; line-height: inherit; white-space: nowrap; transition: background 150ms, transform 150ms; }
+.reset svg { position: absolute; left: .3em; top: 50%; width: .55em; height: .55em; transform: translateY(-50%); }
 .reset:active { transform: scale(.96); }
-.reset svg { width: 16px; height: 16px; }
+@media (hover: hover) { .reset:hover { background: var(--line); } }
 .icon-button { border: 1px solid var(--line); width: 44px; height: 44px; padding: 0; flex-shrink: 0; display: grid; place-items: center; border-radius: 50%; background: transparent; color: var(--muted); transition: background 150ms ease-out, color 150ms ease-out, transform 150ms ease-out; }
 .icon-button:active { transform: scale(.94); background: var(--surface); color: var(--text); }
 @media (hover: hover) { .icon-button:hover, .permission-button:hover { background: var(--surface); color: var(--text); } }
@@ -108,6 +109,7 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
   .topbar { height: 78px; padding: env(safe-area-inset-top) 24px 0; }
   main { padding-top: 23px; }
   .wordmark { font-size: 24px; }
+  .intro-title { font-size: clamp(24px, 8.3vw, 30px); }
   .playground { margin-top: 25px; }
 }
 @media (max-height: 760px) {
@@ -116,7 +118,7 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
   .eyebrow { margin-bottom: 11px; }
   .playground { margin-top: 14px; }
 }
-@media (max-width: 360px) { .topbar { padding-left: 16px; padding-right: 16px; } .topbar-actions { gap: 6px; } .settings-dialog { padding: 20px; } .settings-header h2 { font-size: 19px; } }
+@media (max-width: 360px) { .topbar { padding-left: 16px; padding-right: 16px; } .topbar-actions { gap: 6px; } .intro { padding-inline: 16px; } .settings-dialog { padding: 20px; } .settings-header h2 { font-size: 19px; } }
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon { transition: none !important; }
   .reset, .icon-button, .permission-button, .switch-track, .switch-track::after { transition: none; }

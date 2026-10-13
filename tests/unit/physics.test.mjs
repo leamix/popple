@@ -29,12 +29,12 @@ test('a tap deforms immediately, releases without popping and returns to rest', 
 test('two short holds never accumulate and a complete hold pops once', () => {
   const bubble = new BubbleState(1);
   bubble.press(0, 0);
-  assert.equal(advance(bubble, 0.45), 0);
+  assert.equal(advance(bubble, 0.16), 0);
   bubble.release();
   bubble.press(0, 0);
-  assert.equal(advance(bubble, 0.45), 0);
+  assert.equal(advance(bubble, 0.16), 0);
   assert.equal(bubble.popped, false);
-  assert.equal(advance(bubble, 0.34), 1);
+  assert.equal(advance(bubble, 0.14), 1);
   assert.equal(bubble.holdProgress, 1);
   assert.equal(advance(bubble, 1), 0);
   assert.equal(bubble.press(0, 0), false);
@@ -46,8 +46,8 @@ test('off-centre contact retains its direction and displaces more air', () => {
   const center = new BubbleState(3);
   edge.press(-0.75, 0.35);
   center.press(0, 0);
-  advance(edge, 0.3);
-  advance(center, 0.3);
+  advance(edge, 0.24);
+  advance(center, 0.24);
   assert.ok(edge.x < -0.7);
   assert.ok(edge.y > 0.3);
   assert.ok(edge.bulge > center.bulge * 1.5);
@@ -130,8 +130,8 @@ test('popped film kneads shallowly, dissipates a release and never reinflates or
   assert.equal(bubble.holdProgress, 1);
 });
 
-test('nominal hold time keeps its existing default and follows a configured duration', () => {
-  assert.equal(DEFAULT_HOLD_SECONDS, 0.78);
+test('nominal hold time uses the new default and follows a configured duration', () => {
+  assert.equal(DEFAULT_HOLD_SECONDS, 0.3);
   for (const duration of [DEFAULT_HOLD_SECONDS, 0.2, 0.4, 1.2, 2]) {
     const bubble = new BubbleState(13, duration);
     assert.equal(bubble.holdDuration, duration);
@@ -158,7 +158,7 @@ test('hold duration changes clamp to supported times and discard invalid values'
   assert.equal(advance(bubble, 0.01), 1);
 });
 
-test('genuine variable force preserves the existing pressure shortening ratio at every setting', () => {
+test('genuine variable force shortens hold time proportionally at every setting', () => {
   for (const duration of [DEFAULT_HOLD_SECONDS, 0.3, 1.2, 2]) {
     const variable = new BubbleState(15, duration);
     const fixed = new BubbleState(16, duration);
@@ -166,7 +166,7 @@ test('genuine variable force preserves the existing pressure shortening ratio at
     variable.move(0, 0, 0.9);
     variable.move(0, 0, 1);
     fixed.press(0, 0, 1);
-    const forceDuration = duration * (0.52 / 0.78);
+    const forceDuration = duration * (0.2 / 0.3);
     assert.equal(advance(variable, forceDuration - 0.01), 0);
     assert.equal(advance(variable, 0.01), 1);
     assert.equal(advance(fixed, forceDuration), 0, 'fixed pressure hardware retains nominal timing');
@@ -177,7 +177,7 @@ test('genuine variable force preserves the existing pressure shortening ratio at
 test('rupture captures the latest contact even when the deformation still lags', () => {
   const bubble = new BubbleState(9);
   bubble.press(-0.65, 0.2);
-  advance(bubble, 0.77);
+  advance(bubble, 0.29);
   bubble.move(0.7, -0.3);
   assert.ok(bubble.x < 0, 'the spring has not reached the new contact');
   assert.equal(bubble.step(0.02), true);
@@ -207,18 +207,18 @@ test('variable force accelerates a pop but a fixed hardware value does not', () 
   variable.press(0, 0, 0.3);
   fixed.press(0, 0, 1);
   variable.move(0, 0, 0.9);
-  assert.equal(advance(variable, 0.51), 0);
+  assert.equal(advance(variable, 0.19), 0);
   assert.equal(variable.popped, false);
-  assert.equal(advance(variable, 0.06), 1);
-  assert.equal(advance(fixed, 0.57), 0);
-  assert.equal(advance(fixed, 0.22), 1);
+  assert.equal(advance(variable, 0.03), 1);
+  assert.equal(advance(fixed, 0.22), 0);
+  assert.equal(advance(fixed, 0.1), 1);
 });
 
 test('release cancels a near-complete hold and reset restores the same pocket', () => {
   const bubble = new BubbleState(6);
   const seed = bubble.seed;
   bubble.press(0, 0);
-  advance(bubble, 0.76);
+  advance(bubble, 0.28);
   bubble.release();
   advance(bubble, 0.2);
   assert.equal(bubble.popped, false);
@@ -240,7 +240,7 @@ test('stalled, invalid and negative frames cannot jump the hold or corrupt state
   for (const dt of [NaN, Infinity, -1, 0]) assert.equal(bubble.step(dt, Infinity), false);
   assert.equal(bubble.holdProgress, 0);
   assert.equal(bubble.step(1000, 1000), false);
-  assert.ok(bubble.holdProgress < 0.13);
+  assert.ok(bubble.holdProgress < 0.34);
   for (const key of ['x', 'y', 'popX', 'popY', 'compression', 'bulge', 'collapse', 'popAge', 'holdProgress']) {
     assert.ok(Number.isFinite(bubble[key]), `${key} stays finite`);
   }
@@ -250,7 +250,7 @@ test('hold duration remains consistent from 10 to 120 frames per second', () => 
   for (const frequency of [10, 15, 30, 60, 120]) {
     const bubble = new BubbleState(frequency);
     bubble.press(0.5, 0.1);
-    assert.equal(advance(bubble, 0.75, frequency), 0);
+    assert.equal(advance(bubble, 0.27, frequency), 0);
     assert.equal(advance(bubble, 0.06, frequency), 1);
     assert.equal(advance(bubble, 1, frequency), 0);
     assert.ok(bubble.collapse > 0.99);

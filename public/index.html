@@ -32,7 +32,13 @@
   <main>
     <div class="intro">
       <p class="eyebrow">МАЛЕНЬКАЯ ПАУЗА</p>
-      <h1>Просто полопай.</h1>
+      <div class="intro-title">
+        <h1>Просто полопай</h1>
+        <button id="reset" class="reset" type="button" aria-label="Ещё плёнку">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"/></svg>
+          <span>ещё</span>
+        </button>
+      </div>
     </div>
     <section class="playground" aria-label="Пупырчатая плёнка">
       <div class="sheet" id="sheet" aria-hidden="true"></div>
@@ -41,9 +47,6 @@
       <canvas id="bursts" aria-hidden="true"></canvas>
       <p id="render-error" class="render-error" hidden>Не удалось включить графику. Попробуй открыть страницу в Safari или Chrome.</p>
     </section>
-    <div class="controls">
-      <button id="reset" class="reset"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"/></svg>Ещё плёнку</button>
-    </div>
     <p class="sr-only" id="announcement" aria-live="polite" aria-atomic="true"></p>
   </main>
   <dialog id="settings" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
@@ -58,9 +61,9 @@
       <p id="size-description">Размер на экранах отличается — подстрой под свой палец.</p>
     </div>
     <div class="settings-field">
-      <label class="setting-label" for="hold">Время до хлопка <output id="hold-value" for="hold">0,78 с</output></label>
-      <input id="hold" type="range" min="0.2" max="2" value="0.78" step="0.02" aria-describedby="hold-description">
-      <p id="hold-description">Как долго удерживать пузырёк. По умолчанию — 0,78 с.</p>
+      <label class="setting-label" for="hold">Время до хлопка <output id="hold-value" for="hold">0,3 с</output></label>
+      <input id="hold" type="range" min="0.2" max="2" value="0.3" step="0.02" aria-describedby="hold-description">
+      <p id="hold-description">Как долго удерживать пузырёк. По умолчанию — 0,3 с.</p>
     </div>
     <div class="settings-field tilt-setting">
       <div class="tilt-row">

@@ -248,6 +248,25 @@ export class BurstLayer {
     canvas.width = Math.round(32 * dpr);
     canvas.height = Math.round(32 * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (kind === 1) {
+      // The logo uses an upright bolt; the burst keeps its wider side-facing ray.
+      ctx.translate(16, 3);
+      ctx.fillStyle = dark ? '#f4df9b' : '#f6cd64';
+      ctx.strokeStyle = dark ? '#161b20' : '#293c4a';
+      ctx.lineWidth = 1.15;
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(3, 0);
+      ctx.lineTo(-4, 13);
+      ctx.lineTo(1, 13);
+      ctx.lineTo(-3, 27);
+      ctx.lineTo(8, 10);
+      ctx.lineTo(2, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      return;
+    }
     ctx.translate(kind === 3 ? 9 : 4, kind === 0 ? 20 : 16);
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';

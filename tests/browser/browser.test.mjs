@@ -230,6 +230,7 @@ try {
     assert.equal(await page.evaluate(() => __bubbleStates[4].compression), 0);
   });
   await check('off-center press deforms then restores on early release', async () => {
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
     const p = await center(page, 4, -0.32, 0.16);
     await page.mouse.move(p.x, p.y); await page.mouse.down();
     await page.waitForTimeout(220);
@@ -240,6 +241,7 @@ try {
     await page.waitForTimeout(900);
     assert.equal(await count(page), 0);
     assert.equal(await page.evaluate(() => __bubbleStates[4].compression), 0);
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.3));
     return state;
   });
   await check('continuous mouse hold pops once and leaves a collapsed pocket', async () => {
@@ -283,7 +285,7 @@ try {
     assert.equal(await page.locator('.topbar-actions > button').count(),3);
     assert.equal((await page.locator('#theme').textContent()).trim(),'');
     await page.locator('#settings-open').click();assert.equal(await page.locator('#settings').isVisible(),true);
-    assert.equal(await page.locator('#hold').inputValue(),'0.78');
+    assert.equal(await page.locator('#hold').inputValue(),'0.3');
     await page.keyboard.press('Shift+Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'motion');
     await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.id),'settings-close');
     await page.keyboard.press('Escape');assert.equal(await page.locator('#settings').isVisible(),false);
@@ -296,7 +298,7 @@ try {
     await page.reload();await page.waitForFunction(()=>__bubbleStates?.length===14);
     assert.ok(await page.evaluate(()=>__bubbleStates.every(b=>b.holdDuration===.24)));
     const q=await center(page);await page.mouse.move(q.x,q.y);await page.mouse.down();await waitPopped(page,4,1200);await page.mouse.up();
-    await page.locator('#settings-open').click();await page.locator('#hold').fill('0.78');await page.locator('#settings-close').click();
+    await page.locator('#settings-open').click();await page.locator('#hold').fill('0.3');await page.locator('#settings-close').click();
     await reset(page);
   });
   await check('edge rupture contact stays fixed after release, theme toggle and resize', async () => {
@@ -566,9 +568,11 @@ try {
     await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);
     if (await page.locator('html').getAttribute('data-theme') !== 'dark') await page.locator('#theme').click();
     await page.waitForTimeout(250); await screenshot(page, 'desktop-dark.png');
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
     const edge = await center(page, 4, -0.32, 0.16);
     await page.mouse.move(edge.x, edge.y); await page.mouse.down(); await page.waitForTimeout(220);
     await screenshot(page, 'desktop-edge-press.png'); await page.mouse.up(); await page.waitForTimeout(500);
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.3));
     const p = await center(page, 13);
     await page.mouse.move(p.x, p.y); await page.mouse.down(); await waitPopped(page, 13);
     await screenshot(page, 'desktop-burst.png'); await page.mouse.up(); await page.waitForTimeout(500);
@@ -598,11 +602,13 @@ try {
     await mobile.evaluate(() => { localStorage.setItem('bubble.size', '84'); localStorage.setItem('bubble.theme', 'light'); });
     await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length === 14);
     await mobile.waitForTimeout(250); await screenshot(mobile, 'mobile-light.png');
+    await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
     const pressPoint = await center(mobile, 4, -0.32, 0.16);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...pressPoint, id: 1, force: .5 }] });
     await mobile.waitForTimeout(220); await screenshot(mobile, 'mobile-mid-press.png');
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await mobile.waitForTimeout(500);
+    await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(0.3));
     await mobile.locator('#theme').tap();
     const mp = await center(mobile);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...mp, id: 1, force: .5 }] });
