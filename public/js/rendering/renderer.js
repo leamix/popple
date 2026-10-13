@@ -277,10 +277,10 @@ void main() {
   vec2 exitDirection=-keyDirection();
   float farSide=pow(max(0.,dot(direction,exitDirection)),6.);
   float returnLight=exp(-sq((r-.82)/.14))*farSide;
-  float returnEdge=exp(-sq((r-.955)/.043))*farSide;
+  float returnEdge=exp(-sq((r-mix(.945,.955,u_dark))/mix(.033,.043,u_dark)))*farSide;
   // A directional return through the thin wall lights a wide patch inside
   // the opposite shoulder. This is an optical approximation, not ray tracing.
-  spec+=vec3(.94,.98,1.)*(returnLight*mix(.24,.16,u_dark)+returnEdge*mix(.60,.37,u_dark))*body*(1.-c*.55);
+  spec+=vec3(1.)*(returnLight*mix(.10,.16,u_dark)+returnEdge*mix(1.6,.37,u_dark))*body*(1.-c*.55);
   float shoulder=exp(-sq((r-.958)/.022))*body;
   float shoulderLight=pow(max(0.,dot(normalize(turn(vec2(-.7,.8),u_light_angle)),direction)),5.);
   spec+=vec3(.84,.94,1.)*shoulder*(.06+.30*shoulderLight)*(1.-c*.75)*mix(.22,1.,u_dark);
@@ -308,6 +308,12 @@ void main() {
   float foldShade=c*clamp((dx-dy)*mix(.14,.07,u_dark),0.,mix(.16,.09,u_dark));
   float shadowA=shadow*mix(.050,.11,u_dark)+body*foldShade;
   shadowA+=(1.-u_dark)*(rimOcclusion*.10+body*pow(1.-normal.z,3.)*.025+c*body*(1.-normal.z)*.035);
+  // On pale backing white alone has little contrast. A narrow shaded wall
+  // beside the return and a local shadow behind the caustic reveal its light.
+  // They follow the source and never wrap the pocket in another dark ring.
+  float returnShade=exp(-sq((r-.878)/.044))*farSide*body*(1.-c*.55);
+  float causticShade=exp(-sq((r-1.205)/.035))*farSide*(1.-c*.55);
+  shadowA+=(1.-u_dark)*(returnShade*.18+causticShade*.20);
   float alpha=clamp(specMax+(coat+shadowA)*(1.-specMax),0.,1.);
   float transmissionLight=mix(.79+shade*.25,.92+shade*.08,u_dark);
   vec3 premul=spec+bg*coat*(1.-specMax)*transmissionLight;
@@ -320,7 +326,7 @@ void main() {
   spill+=exp(-sq(bend/.095))*exp(-sq(across/.53))*.22;
   vec2 pixel=u_origin+p*vec2(1.,-1.)*u_radius;
   spill*=smoothstep(1.09,1.13,r)*(1.-smoothstep(1.22,1.29,r))*sheetMask(pixel);
-  spill*=mix(.55,.80,u_seed)*(1.-c*.55)*mix(1.,.55,u_dark);
+  spill=clamp(spill*mix(.55,.80,u_seed)*(1.-c*.55)*mix(1.30,.55,u_dark),0.,.98);
   premul=vec3(spill)+premul*(1.-spill);
   alpha=spill+alpha*(1.-spill);
   gl_FragColor=vec4(min(premul,vec3(alpha)),alpha);
