@@ -689,6 +689,105 @@ try {
     await comparison.close();
     return frameSample;
   });
+  await check('far-side reflection and transmitted caustic oppose the primary highlight in both themes and follow lighting', async () => {
+    const samples = await page.evaluate(async () => {
+      const { FilmRenderer } = await import('/js/rendering/renderer.js');
+      const canvas = document.createElement('canvas');
+      const renderer = new FilmRenderer(canvas);
+      const radius = 72, centre = 160, size = 320, target = 4;
+      renderer.resize(size, size, 1);
+      // A single visible pocket isolates its transmitted mark from neighbours.
+      // Keep valid entries for every shader site and preserve the same geometry
+      // and membrane state throughout the theme/lighting comparison.
+      const layout = __filmLayout.map((_, index) => ({
+        x: index === target ? centre : 10000 + index * 300,
+        y: index === target ? centre : 10000,
+        radius,
+      }));
+      const states = __bubbleStates.map(bubble => ({ ...bubble,
+        seed: .65,
+        x: 0, y: 0, popX: 0, popY: 0, compression: 0, bulge: 0,
+        collapse: 0, popped: false,
+      }));
+      const initialGeometry = JSON.stringify(layout), initialStates = JSON.stringify(states);
+      const previousInstrumentation = {
+        renderer: __filmRenderer, layout: __filmLayout, dark: __filmDark,
+        time: __filmTime, light: __lastLight,
+      };
+      const lights = [
+        { name: 'neutral', x: 0, y: 0, angle: 0 },
+        { name: 'tilted', x: .08, y: -.06, angle: .70 },
+      ];
+      const observations = [];
+      try {
+        for (const dark of [true, false]) for (const light of lights) {
+          renderer.render(states, layout, dark, 0, light);
+          const gl = renderer.gl, pixels = new Uint8Array(size * size * 4);
+          // Read in the render task, before WebGL discards the drawing buffer.
+          gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+          if (gl.getError() !== gl.NO_ERROR) throw new Error('Caustic regression WebGL readback failed.');
+          let primaryCount = 0, primaryX = 0, primaryY = 0, peak = 0;
+          const annulus = [];
+          for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+            const dx = x + .5 - centre, dy = y + .5 - centre;
+            const distance = Math.hypot(dx, dy) / radius;
+            const offset = ((size - 1 - y) * size + x) * 4;
+            const white = Math.min(pixels[offset], pixels[offset + 1], pixels[offset + 2], pixels[offset + 3]);
+            if (distance <= .90 && white >= 245) {
+              primaryCount++; primaryX += dx; primaryY += dy;
+            }
+            if (distance >= 1.10 && distance <= 1.27) {
+              peak = Math.max(peak, white);
+              annulus.push({ x: dx, y: dy, white });
+            }
+          }
+          let causticCount = 0, weight = 0, causticX = 0, causticY = 0;
+          // Measure the strongest actual white mark in the outer annulus. This
+          // selects the transmitted patch independently of its expected angle.
+          for (const pixel of annulus) if (pixel.white >= peak * .75) {
+            causticCount++; weight += pixel.white;
+            causticX += pixel.x * pixel.white; causticY += pixel.y * pixel.white;
+          }
+          observations.push({ theme: dark ? 'dark' : 'light', light,
+            primary: { pixels: primaryCount, x: primaryX / primaryCount, y: primaryY / primaryCount },
+            caustic: { pixels: causticCount, peak, x: causticX / weight, y: causticY / weight },
+          });
+        }
+        return { observations,
+          unchangedGeometry: JSON.stringify(layout) === initialGeometry,
+          unchangedState: JSON.stringify(states) === initialStates,
+        };
+      } finally {
+        // Instrumented samples must not replace the running app's renderer.
+        window.__filmRenderer = previousInstrumentation.renderer;
+        window.__filmLayout = previousInstrumentation.layout;
+        window.__filmDark = previousInstrumentation.dark;
+        window.__filmTime = previousInstrumentation.time;
+        window.__lastLight = previousInstrumentation.light;
+        renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
+      }
+    });
+    assert.equal(samples.unchangedGeometry, true, 'Lighting must preserve the isolated pocket geometry.');
+    assert.equal(samples.unchangedState, true, 'Lighting must preserve the isolated membrane state.');
+    const angleDifference = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));
+    for (const theme of ['dark', 'light']) {
+      const [neutral, tilted] = samples.observations.filter(sample => sample.theme === theme);
+      for (const sample of [neutral, tilted]) {
+        const details = `${theme} ${sample.light.name}: ${JSON.stringify(sample)}`;
+        assert.ok(sample.primary.pixels > 20, `A measurable primary white core must remain visible. ${details}`);
+        assert.ok(sample.caustic.peak > 64 && sample.caustic.pixels > 8, `The transmitted caustic must remain visible. ${details}`);
+        const dot = (sample.primary.x * sample.caustic.x + sample.primary.y * sample.caustic.y) /
+          (Math.hypot(sample.primary.x, sample.primary.y) * Math.hypot(sample.caustic.x, sample.caustic.y));
+        assert.ok(dot < -.5, `The transmitted reflection must lie opposite the measured primary highlight (dot=${dot}). ${details}`);
+      }
+      const primaryTurn = angleDifference(Math.atan2(neutral.primary.y, neutral.primary.x), Math.atan2(tilted.primary.y, tilted.primary.x));
+      const causticTurn = angleDifference(Math.atan2(neutral.caustic.y, neutral.caustic.x), Math.atan2(tilted.caustic.y, tilted.caustic.x));
+      assert.ok(Math.abs(primaryTurn) > 15 * Math.PI / 180, `${theme} primary reflection must visibly rotate.`);
+      assert.ok(Math.abs(causticTurn) > 20 * Math.PI / 180, `${theme} transmitted caustic must visibly rotate.`);
+      assert.ok(primaryTurn * causticTurn > 0, `${theme} primary reflection and far-side caustic must rotate in the same direction.`);
+    }
+    return samples;
+  });
   await check('no application console or runtime errors', async () => assert.deepEqual(report.errors, []));
 
   const matchedWebkit = available.find(item => existsSync(path.join(homedir(), 'Library/Caches/ms-playwright', `webkit-${item.webkitRevision}`)));
