@@ -3,6 +3,7 @@ import { FilmRenderer } from '../rendering/renderer.js';
 import { PopAudio, BurstLayer } from '../audio/effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
+import { APP_CONFIG } from '../core/config.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
@@ -23,7 +24,7 @@ const rawTouchEvents='ontouchstart' in window;
 const activationTimers=new Map();
 const keyboardOwners=new Map();
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
-const burstPadding=80;
+const burstPadding=APP_CONFIG.burstPadding;
 let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
 let dark=storage.get('theme','dark')==='dark';
 let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
@@ -32,7 +33,7 @@ let light={x:0,y:0,angle:0}, lightTarget={x:0,y:0,angle:0};
 let tiltWanted=storage.get('tilt','true')==='true',tiltStatus='idle';
 const deviceLighting=new DeviceLighting({
   reduced,
-  onChange:vector=>{lightTarget=vector;wake(.7);},
+  onChange:vector=>{lightTarget=vector;wake(APP_CONFIG.tiltWakeSeconds);},
   onStatus:status=>{tiltStatus=status;updateTilt();}
 });
 const buttons=bubbles.map((bubble,i)=>{
@@ -64,7 +65,7 @@ function pulse(duration) {
   try { navigator.vibrate(duration); } catch { /* Haptics are optional. */ }
 }
 
-function wake(seconds=.9) {
+function wake(seconds=APP_CONFIG.wakeSeconds) {
   renderDirty=true;
   animateUntil=Math.max(animateUntil,performance.now()/1000+seconds);
   if(!frame&&!document.hidden&&!contextLost) {lastTime=performance.now()/1000;frame=requestAnimationFrame(tick);}
@@ -84,8 +85,8 @@ function tick(ms) {
       buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул. Можно помять плёнку`);
       const count=bubbles.filter(b=>b.popped).length;
       $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
-      animateUntil=now+1.1;
-      pulse(12);
+      animateUntil=now+APP_CONFIG.popWakeSeconds;
+      pulse(APP_CONFIG.hapticPopMilliseconds);
     }
     active ||= b.active;
   }
@@ -111,8 +112,8 @@ function cancelAll() {
 function resize() {
   cancelAll();effects.clear();
   const geometry=createBubbleLayout(window.innerWidth,diameter);
-  const fullViewport=matchMedia('(max-width: 540px)').matches;
-  const fieldPadding=fullViewport?0:24;
+  const fullViewport=matchMedia(`(max-width: ${APP_CONFIG.mobileBreakpoint}px)`).matches;
+  const fieldPadding=fullViewport?0:APP_CONFIG.desktopFieldPadding;
   const width=fullViewport?window.innerWidth:geometry.width+fieldPadding*2;
   const height=fullViewport?window.innerHeight:geometry.height+fieldPadding*2;
   const offsetX=fullViewport?(width-geometry.width)/2:fieldPadding;
@@ -125,7 +126,7 @@ function resize() {
     Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
     if(hapticTargets[i])hapticTargets[i].style.cssText=button.style.cssText;
   }
-  const dpr=Math.min(devicePixelRatio||1,2.5);
+  const dpr=Math.min(devicePixelRatio||1,APP_CONFIG.maximumDevicePixelRatio);
   renderer?.resize(width,height,dpr);
   effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
   $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
@@ -136,7 +137,7 @@ function setTheme() {
   $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
   $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';
-  storage.set('theme',dark?'dark':'light');wake(.4);
+  storage.set('theme',dark?'dark':'light');wake(APP_CONFIG.themeWakeSeconds);
 }
 function coordinates(event,index) {
   const rect=$('.playground').getBoundingClientRect(),p=layout[index];
@@ -162,7 +163,7 @@ function movePointer(event) {
     if(index>=0) {
       const p=coordinates(event,index);
       if(bubbles[index].press(p.x,p.y,event.pressure,performance.now()/1000)) {
-        contact.index=index;pulse(5);
+        contact.index=index;pulse(APP_CONFIG.hapticPressMilliseconds);
       }
     }
   } else if(index>=0) {
@@ -207,7 +208,8 @@ buttons.forEach((button,i)=>{
       const timer=setTimeout(()=>{
         if(activationTimers.get(i)!==timer)return;
         bubbles[i].release();activationTimers.delete(i);wake();
-      },(bubbles[i].popped?.24:bubbles[i].holdDuration+.2)*1000);
+      },(bubbles[i].popped?APP_CONFIG.assistivePoppedDurationSeconds:
+        bubbles[i].holdDuration+APP_CONFIG.assistiveHoldGraceSeconds)*1000);
       activationTimers.set(i,timer);
     }
   });
@@ -250,7 +252,8 @@ playground.addEventListener('gesturestart',event=>event.preventDefault());
 playground.addEventListener('contextmenu',event=>event.preventDefault());
 document.addEventListener('pointermove',event=>{
   if(event.pointerType==='touch'||reduced||deviceLighting.hasData)return;
-  lightTarget={x:(event.clientX/innerWidth-.5)*.055,y:-(event.clientY/innerHeight-.5)*.055,angle:0};wake(.55);
+  lightTarget={x:(event.clientX/innerWidth-.5)*APP_CONFIG.pointerLightShift,
+    y:-(event.clientY/innerHeight-.5)*APP_CONFIG.pointerLightShift,angle:0};wake(APP_CONFIG.pointerLightWakeSeconds);
 },{passive:true});
 document.addEventListener('selectstart',event=>event.preventDefault());
 document.addEventListener('dragstart',event=>event.preventDefault());

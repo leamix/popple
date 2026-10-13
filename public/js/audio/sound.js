@@ -1,6 +1,8 @@
 // Deterministic, dependency-free synthesis of small, dry plastic ruptures.
 // Different material envelopes matter much more than simply changing pitch.
 
+import { POP_SOUND_CONFIG } from '../core/config.js';
+
 const TAU = Math.PI * 2;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -15,8 +17,8 @@ function randomFrom(seed) {
   };
 }
 
-export const POP_FAMILIES = Object.freeze(['snap', 'body', 'crinkle', 'tight', 'double']);
-const weights = [3, 3, 2.2, 2, 0.65];
+export const POP_FAMILIES = POP_SOUND_CONFIG.families;
+const weights = POP_SOUND_CONFIG.familyWeights;
 
 /** Reproducible selection, with no adjacent matching families or short loop. */
 export class PopSequence {
@@ -39,23 +41,16 @@ export class PopSequence {
   }
 }
 
-const profiles = {
-  snap: { duration: .068, spread: .010, decay: .0027, cutoff: 7800, highpass: 700, noise: 1.18, resonance: .20, frequency: 600, ring: .0028 },
-  body: { duration: .078, spread: .012, decay: .0034, cutoff: 6200, highpass: 450, noise: 1.20, resonance: .36, frequency: 350, ring: .0045 },
-  // Keep the public family ID, but use one slightly longer folded-film snap.
-  // Delayed noise microcracks sounded like electrical static in headphones.
-  crinkle: { duration: .078, spread: .013, decay: .0042, cutoff: 6900, highpass: 650, noise: 1.14, resonance: .26, frequency: 470, ring: .0040 },
-  tight: { duration: .061, spread: .012, decay: .00165, cutoff: 7600, highpass: 1000, noise: 1.24, resonance: .18, frequency: 880, ring: .0021 },
-  double: { duration: .109, spread: .012, decay: .0028, cutoff: 7500, highpass: 600, noise: 1.18, resonance: .25, frequency: 500, ring: .0033 },
-};
+const profiles = POP_SOUND_CONFIG.profiles;
 
 /**
  * Returns mono float samples, without constructing an AudioContext.
  * An optional family preserves makeSnap(seed)'s deterministic testing API.
  */
 export function synthesizePop(sampleRate, seed, family = POP_FAMILIES[(seed >>> 0) % POP_FAMILIES.length]) {
-  if (!Number.isFinite(sampleRate) || sampleRate < 8000 || sampleRate > 192000) {
-    throw new RangeError('sampleRate must be between 8000 and 192000 Hz');
+  if (!Number.isFinite(sampleRate) || sampleRate < POP_SOUND_CONFIG.minimumSampleRate
+    || sampleRate > POP_SOUND_CONFIG.maximumSampleRate) {
+    throw new RangeError(`sampleRate must be between ${POP_SOUND_CONFIG.minimumSampleRate} and ${POP_SOUND_CONFIG.maximumSampleRate} Hz`);
   }
   if (!Object.hasOwn(profiles, family)) throw new RangeError(`Unknown pop family: ${family}`);
   const profile = profiles[family];

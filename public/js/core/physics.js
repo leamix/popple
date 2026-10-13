@@ -1,14 +1,16 @@
-export const DEFAULT_HOLD_SECONDS = 0.3;
-const MIN_HOLD_SECONDS = 0.2;
+import { PHYSICS_CONFIG } from './config.js';
+
+export const DEFAULT_HOLD_SECONDS = PHYSICS_CONFIG.defaultHoldSeconds;
+const MIN_HOLD_SECONDS = PHYSICS_CONFIG.minimumHoldSeconds;
 const HOLD_PRESSURE_RATIO = MIN_HOLD_SECONDS / DEFAULT_HOLD_SECONDS;
-const FILM_REST_COMPRESSION = 0.06;
-const MAX_FRAME_SECONDS = 0.05;
-const MAX_HOLD_FRAME_SECONDS = 0.1;
+const FILM_REST_COMPRESSION = PHYSICS_CONFIG.settledCompression;
+const MAX_FRAME_SECONDS = PHYSICS_CONFIG.maximumFrameSeconds;
+const MAX_HOLD_FRAME_SECONDS = PHYSICS_CONFIG.maximumHoldFrameSeconds;
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
-const position = value => clamp(finite(value), -1, 1);
-const pressureValue = value => clamp(finite(value, 0.5), 0, 1);
+const position = value => clamp(finite(value), -PHYSICS_CONFIG.coordinateLimit, PHYSICS_CONFIG.coordinateLimit);
+const pressureValue = value => clamp(finite(value, PHYSICS_CONFIG.defaultPressure), 0, 1);
 
 function seedFor(index) {
   let value = (Math.trunc(finite(index)) + 1) >>> 0;
@@ -32,7 +34,8 @@ export class BubbleState {
 
   /** Nominal hold time; genuine varying force can shorten it proportionally. */
   setHoldDuration(seconds) {
-    this.holdDuration = clamp(finite(seconds, DEFAULT_HOLD_SECONDS), 0.2, 2);
+    this.holdDuration = clamp(finite(seconds, DEFAULT_HOLD_SECONDS),
+      PHYSICS_CONFIG.minimumHoldSeconds, PHYSICS_CONFIG.maximumHoldSeconds);
     return this.holdDuration;
   }
 
@@ -55,14 +58,14 @@ export class BubbleState {
     this._compressionVelocity = 0;
     this._bulgeVelocity = 0;
     this._heldSeconds = 0;
-    this._pressure = 0.5;
-    this._minPressure = 0.5;
-    this._maxPressure = 0.5;
+    this._pressure = PHYSICS_CONFIG.defaultPressure;
+    this._minPressure = PHYSICS_CONFIG.defaultPressure;
+    this._maxPressure = PHYSICS_CONFIG.defaultPressure;
     this._pressureVaries = false;
     this._pressStartedAt = 0;
   }
 
-  press(x, y, pressure = 0.5, timeSeconds = 0) {
+  press(x, y, pressure = PHYSICS_CONFIG.defaultPressure, timeSeconds = 0) {
     if (this.active) return false;
     this.active = true;
     this.x = this._targetX = position(x);
@@ -75,12 +78,13 @@ export class BubbleState {
     this._heldSeconds = 0;
     this.holdProgress = this.popped ? 1 : 0;
     // A visible dimple belongs to the very first contact frame.
-    this.compression = Math.max(this.compression, this.popped ? 0.085 : 0.16);
-    this.bulge = this.popped ? 0 : Math.max(this.bulge, 0.035);
+    this.compression = Math.max(this.compression, this.popped
+      ? PHYSICS_CONFIG.initialContact.poppedCompression : PHYSICS_CONFIG.initialContact.intactCompression);
+    this.bulge = this.popped ? 0 : Math.max(this.bulge, PHYSICS_CONFIG.initialContact.intactBulge);
     return true;
   }
 
-  move(x, y, pressure = 0.5) {
+  move(x, y, pressure = PHYSICS_CONFIG.defaultPressure) {
     if (!this.active) return false;
     this._targetX = position(x);
     this._targetY = position(y);
@@ -89,8 +93,9 @@ export class BubbleState {
     this._maxPressure = Math.max(this._maxPressure, this._pressure);
     // Touch screens commonly report a constant 0.5, or simply 0/1. Only a
     // changing intermediate value provides useful evidence of pressure.
-    if (this._pressure > 0.02 && this._pressure < 0.98 &&
-        this._maxPressure - this._minPressure >= 0.075) {
+    if (this._pressure > PHYSICS_CONFIG.pressure.minimumEvidence
+      && this._pressure < PHYSICS_CONFIG.pressure.maximumEvidence
+      && this._maxPressure - this._minPressure >= PHYSICS_CONFIG.pressure.minimumVariation) {
       this._pressureVaries = true;
     }
     return true;
@@ -117,7 +122,8 @@ export class BubbleState {
     if (this.active && !this.popped) {
       this._heldSeconds += elapsed;
       const force = this._pressureVaries
-        ? clamp((this._pressure - 0.35) / 0.65, 0, 1) : 0;
+        ? clamp((this._pressure - PHYSICS_CONFIG.pressure.forceFloor)
+          / (1 - PHYSICS_CONFIG.pressure.forceFloor), 0, 1) : 0;
       const duration = this.holdDuration * (1 - force * (1 - HOLD_PRESSURE_RATIO));
       this.holdProgress = clamp(this._heldSeconds / duration, 0, 1);
       if (this._heldSeconds + 1e-9 >= duration) {
@@ -140,54 +146,69 @@ export class BubbleState {
       // Fast loss of air, then two tiny film-settling ripples. The public
       // collapse value remains in [0,1], including during the rebound.
       const age = this.popAge;
-      this.collapse = clamp(1 - Math.exp(-16 * age) *
-        (Math.cos(26 * age) + (16 / 26) * Math.sin(26 * age)), 0, 1);
+      this.collapse = clamp(1 - Math.exp(-PHYSICS_CONFIG.collapse.decay * age) *
+        (Math.cos(PHYSICS_CONFIG.collapse.frequency * age)
+          + (PHYSICS_CONFIG.collapse.decay / PHYSICS_CONFIG.collapse.frequency)
+            * Math.sin(PHYSICS_CONFIG.collapse.frequency * age)), 0, 1);
     }
 
-    const force = this._pressureVaries ? this._pressure : 0.5;
+    const force = this._pressureVaries ? this._pressure : PHYSICS_CONFIG.defaultPressure;
     // A ruptured pocket has no sealed air to displace. Only a shallow local
     // indentation remains; saved popX/popY still locate the permanent creases.
     const targetCompression = this.popped
-      ? this.active ? 0.12 + 0.07 * force : FILM_REST_COMPRESSION : this.active
-      ? 0.25 + 0.53 * Math.pow(this.holdProgress, 0.85) + 0.05 * force : 0;
+      ? this.active ? PHYSICS_CONFIG.activeCompression.poppedBase
+        + PHYSICS_CONFIG.activeCompression.poppedForce * force : FILM_REST_COMPRESSION : this.active
+      ? PHYSICS_CONFIG.activeCompression.intactBase
+        + PHYSICS_CONFIG.activeCompression.intactProgress * Math.pow(this.holdProgress,
+          PHYSICS_CONFIG.activeCompression.intactProgressExponent)
+        + PHYSICS_CONFIG.activeCompression.intactForce * force : 0;
     const distance = Math.min(1, Math.hypot(this.x, this.y));
-    const targetBulge = this.popped ? 0 : targetCompression * (0.20 + distance * 0.36);
+    const targetBulge = this.popped ? 0 : targetCompression * (PHYSICS_CONFIG.bulge.base
+      + distance * PHYSICS_CONFIG.bulge.distance);
 
     // Small integration steps keep the same damped spring behaviour at 30,
     // 60 and 120 Hz, without an external animation/physics dependency.
-    const count = Math.ceil(delta / (1 / 180));
+    const count = Math.ceil(delta / (1 / PHYSICS_CONFIG.integrationFrequency));
     const h = delta / count;
     for (let i = 0; i < count; i += 1) {
-      const positionStiffness = this.popped ? this.active ? 390 : 165 : this.active ? 650 : 205;
-      const positionDamping = this.popped ? this.active ? 42 : 29 : this.active ? 36 : 21;
+      const positionStiffness = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveStiffness
+        : PHYSICS_CONFIG.spring.position.poppedIdleStiffness : this.active
+          ? PHYSICS_CONFIG.spring.position.intactActiveStiffness : PHYSICS_CONFIG.spring.position.intactIdleStiffness;
+      const positionDamping = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveDamping
+        : PHYSICS_CONFIG.spring.position.poppedIdleDamping : this.active
+          ? PHYSICS_CONFIG.spring.position.intactActiveDamping : PHYSICS_CONFIG.spring.position.intactIdleDamping;
       this._vx += ((this._targetX - this.x) * positionStiffness - this._vx * positionDamping) * h;
       this._vy += ((this._targetY - this.y) * positionStiffness - this._vy * positionDamping) * h;
       this.x += this._vx * h;
       this.y += this._vy * h;
 
-      const stiffness = this.popped ? 560 : this.active ? 430 : 270;
+      const stiffness = this.popped ? PHYSICS_CONFIG.spring.compression.poppedStiffness : this.active
+        ? PHYSICS_CONFIG.spring.compression.intactActiveStiffness : PHYSICS_CONFIG.spring.compression.intactIdleStiffness;
       // Slack plastic dissipates the poke instead of rebounding like an air
       // pocket. Keep this response close to critically damped.
-      const damping = this.popped ? 48 : this.active ? 30 : 24;
+      const damping = this.popped ? PHYSICS_CONFIG.spring.compression.poppedDamping : this.active
+        ? PHYSICS_CONFIG.spring.compression.intactActiveDamping : PHYSICS_CONFIG.spring.compression.intactIdleDamping;
       this._compressionVelocity += ((targetCompression - this.compression) * stiffness -
         this._compressionVelocity * damping) * h;
       this.compression += this._compressionVelocity * h;
-      this._bulgeVelocity += ((targetBulge - this.bulge) * 330 - this._bulgeVelocity * 28) * h;
+      this._bulgeVelocity += ((targetBulge - this.bulge) * PHYSICS_CONFIG.spring.bulge.stiffness
+        - this._bulgeVelocity * PHYSICS_CONFIG.spring.bulge.damping) * h;
       this.bulge += this._bulgeVelocity * h;
     }
 
     this.compression = clamp(this.compression, 0, 1);
-    this.bulge = this.popped ? 0 : clamp(this.bulge, 0, 0.6);
-    this.x = clamp(this.x, -1, 1);
-    this.y = clamp(this.y, -1, 1);
-    if (!this.active && !this.popped && this.compression < 0.0001 && this.bulge < 0.0001) {
+    this.bulge = this.popped ? 0 : clamp(this.bulge, 0, PHYSICS_CONFIG.bulge.maximum);
+    this.x = clamp(this.x, -PHYSICS_CONFIG.coordinateLimit, PHYSICS_CONFIG.coordinateLimit);
+    this.y = clamp(this.y, -PHYSICS_CONFIG.coordinateLimit, PHYSICS_CONFIG.coordinateLimit);
+    if (!this.active && !this.popped && this.compression < PHYSICS_CONFIG.settleEpsilon
+      && this.bulge < PHYSICS_CONFIG.settleEpsilon) {
       this.compression = this.bulge = 0;
       this._compressionVelocity = this._bulgeVelocity = 0;
       this.x = this.y = this._vx = this._vy = 0;
     }
     if (!this.active && this.popped &&
-        Math.abs(this.compression - FILM_REST_COMPRESSION) < 0.0001 &&
-        Math.hypot(this.x, this.y) < 0.0001) {
+        Math.abs(this.compression - FILM_REST_COMPRESSION) < PHYSICS_CONFIG.settleEpsilon &&
+        Math.hypot(this.x, this.y) < PHYSICS_CONFIG.settleEpsilon) {
       this.compression = FILM_REST_COMPRESSION;
       this._compressionVelocity = this._bulgeVelocity = 0;
       this.x = this.y = this._vx = this._vy = 0;

@@ -1,6 +1,6 @@
 import { COMIC_SYMBOLS, drawComicSymbol } from '../core/comic-symbols.js';
+import { BRAND_CONFIG } from '../core/config.js';
 
-const BRAND_SIZE = 32;
 const STAR_ID = 'legacy-star';
 
 // The burst may still use the complete approved catalogue. The small star
@@ -21,12 +21,12 @@ export function chooseBrandAccent(previous = -1, random = Math.random) {
 export function drawBrandAccent(canvas, kind, dark, dpr = globalThis.devicePixelRatio || 1) {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
-  const ratio = Math.min(3, Math.max(1, dpr));
-  canvas.width = Math.round(BRAND_SIZE * ratio);
-  canvas.height = Math.round(BRAND_SIZE * ratio);
+  const ratio = Math.min(BRAND_CONFIG.maxDevicePixelRatio, Math.max(1, dpr));
+  canvas.width = Math.round(BRAND_CONFIG.canvasSize * ratio);
+  canvas.height = Math.round(BRAND_CONFIG.canvasSize * ratio);
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.translate(BRAND_SIZE / 2, BRAND_SIZE / 2);
-  ctx.scale(0.86, 0.86);
+  ctx.translate(BRAND_CONFIG.canvasSize / 2, BRAND_CONFIG.canvasSize / 2);
+  ctx.scale(BRAND_CONFIG.glyphScale, BRAND_CONFIG.glyphScale);
   // A glyph's native +Y is its lower side. Rotate it left so that side faces
   // the wordmark instead of hanging below it.
   ctx.rotate(Math.PI / 2);

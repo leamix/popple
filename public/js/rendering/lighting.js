@@ -1,7 +1,9 @@
+import { LIGHTING_CONFIG } from '../core/config.js';
+
 const RADIANS = Math.PI / 180;
-const DATA_TIMEOUT = 5000;
-export const MAX_LIGHT_SHIFT = .17;
-export const MAX_REFLECTION_ANGLE = .95;
+const DATA_TIMEOUT = LIGHTING_CONFIG.dataTimeoutMilliseconds;
+export const MAX_LIGHT_SHIFT = LIGHTING_CONFIG.maximumLightShift;
+export const MAX_REFLECTION_ANGLE = LIGHTING_CONFIG.maximumReflectionAngle;
 
 export function angleDifference(angle, reference) {
   const difference = angle % 360 - reference % 360;

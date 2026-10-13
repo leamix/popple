@@ -28,16 +28,30 @@ test('a pop uses a varied group of distinct manga symbols', () => {
   assert.equal(seen.size, COMIC_SYMBOLS.length, 'Repeated pops should use the complete approved catalogue.');
 });
 
-test('a normal-motion pop stays airy with five to seven distinct symbols', () => {
+test('a normal-motion pop stays airy with six to eight distinct symbols', () => {
   const layer = createLayer();
   for (let serial = 1; serial <= 80; serial++) {
     layer.serial = serial;
     layer.burst(100, 100, 40);
     const rays = layer.bursts.at(-1).rays;
-    assert.ok(rays.length >= 5 && rays.length <= 7,
-      `Normal motion must use 5–7 symbols, received ${rays.length}.`);
+    assert.ok(rays.length >= 6 && rays.length <= 8,
+      `Normal motion must use 6–8 symbols, received ${rays.length}.`);
     assert.equal(new Set(rays.map(ray => ray.kind)).size, rays.length,
       'A smaller burst must still not repeat a symbol.');
+  }
+});
+
+test('a normal-motion pop spaces its symbols at equal angles', () => {
+  const layer = createLayer();
+  for (let serial = 1; serial <= 80; serial++) {
+    layer.serial = serial;
+    layer.burst(100, 100, 40);
+    const rays = layer.bursts.at(-1).rays;
+    const step = Math.PI * 2 / rays.length;
+    for (let index = 1; index < rays.length; index++) {
+      assert.ok(Math.abs((rays[index].angle - rays[index - 1].angle) - step) < 1e-10,
+        'Adjacent symbols must keep a constant angular step.');
+    }
   }
 });
 

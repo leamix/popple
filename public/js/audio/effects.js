@@ -1,5 +1,6 @@
 import { PopSequence, synthesizePop } from './sound.js';
 import { COMIC_SYMBOLS, drawComicSymbol, sampleComicSymbols } from '../core/comic-symbols.js';
+import { BURST_CONFIG } from '../core/config.js';
 
 // Short, dry plastic transients and perimeter-only comic accents.
 // Everything is generated locally: no audio download or external dependencies.
@@ -157,31 +158,32 @@ export class BurstLayer {
 
   burst(x, y, radius, { dark = true, reducedMotion = false } = {}) {
     if (!this.context) return;
-    const random = randomFrom(++this.serial * 9817);
+    const random = randomFrom(++this.serial * BURST_CONFIG.randomSeedMultiplier);
     const count = Math.min(COMIC_SYMBOLS.length,
-      reducedMotion ? 3 + Math.floor(random() * 3) : 5 + Math.floor(random() * 3));
-    // Irregular gaps keep accents apart without creating the same radial stamp.
-    const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.8);
-    const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
-    let angle = random() * TAU;
+      reducedMotion
+        ? BURST_CONFIG.reduced.minSymbols + Math.floor(random() * BURST_CONFIG.reduced.symbolCountRange)
+        : BURST_CONFIG.normal.minSymbols + Math.floor(random() * BURST_CONFIG.normal.symbolCountRange));
+    // Every burst can begin at a different angle, while its symbols stay evenly
+    // spaced around the pocket so the ring remains breathable and deliberate.
+    const startAngle = random() * TAU;
+    const angularStep = TAU / count;
     const kinds = sampleComicSymbols(count, random);
-    const rays = gaps.map((gap, index) => {
+    const rays = Array.from({ length: count }, (_, index) => {
       const ray = {
-        angle,
+        angle: startAngle + angularStep * index,
         kind: kinds[index],
-        size: 0.66 + random() * 0.32,
-        aspect: 0.88 + random() * 0.24,
-        reach: 0.65 + random() * 0.65,
-        offset: 5 + random() * 5,
-        delay: reducedMotion ? 0 : random() * 0.028,
+        size: BURST_CONFIG.glyph.size + random() * BURST_CONFIG.glyph.sizeRange,
+        aspect: BURST_CONFIG.glyph.aspect + random() * BURST_CONFIG.glyph.aspectRange,
+        reach: BURST_CONFIG.glyph.reach + random() * BURST_CONFIG.glyph.reachRange,
+        offset: BURST_CONFIG.glyph.offset + random() * BURST_CONFIG.glyph.offsetRange,
+        delay: reducedMotion ? 0 : random() * BURST_CONFIG.glyph.delayRange,
       };
-      angle += (gap / totalGap) * TAU;
       return ray;
     });
-    this.bursts.push({ x, y, radius: Math.max(8, radius), dark, reducedMotion, rays,
-      start: performance.now() / 1000, duration: reducedMotion ? 0.18 : 0.51 });
+    this.bursts.push({ x, y, radius: Math.max(BURST_CONFIG.glyph.minimumRadius, radius), dark, reducedMotion, rays,
+      start: performance.now() / 1000, duration: reducedMotion ? BURST_CONFIG.reduced.duration : BURST_CONFIG.normal.duration });
     // Multitouch remains bounded even if a caller emits an accidental stream.
-    if (this.bursts.length > 20) this.bursts.shift();
+    if (this.bursts.length > BURST_CONFIG.maximumConcurrentBursts) this.bursts.shift();
   }
 
   render(timeSeconds = performance.now() / 1000) {
@@ -192,27 +194,30 @@ export class BurstLayer {
     for (const burst of this.bursts) {
       const age = Math.max(0, timeSeconds - burst.start);
       const progress = clamp(age / burst.duration, 0, 1);
-      const scale = clamp(burst.radius / 40, 0.65, 1.65);
+      const scale = clamp(burst.radius / BURST_CONFIG.animation.radiusReference,
+        BURST_CONFIG.animation.minimumScale, BURST_CONFIG.animation.maximumScale);
       ctx.save();
       ctx.translate(burst.x, burst.y);
       // Keep every doodle outside the popped pocket.
       ctx.beginPath();
       ctx.rect(-this.width * 2, -this.height * 2, this.width * 4, this.height * 4);
-      ctx.arc(0, 0, burst.radius * 1.045, 0, TAU);
+      ctx.arc(0, 0, burst.radius * BURST_CONFIG.glyph.clipRadiusScale, 0, TAU);
       ctx.clip('evenodd');
       for (const ray of burst.rays) {
         const local = clamp((age - ray.delay) / (burst.duration - ray.delay), 0, 1);
         if (age < ray.delay) continue;
-        const travel = burst.reducedMotion ? 0 : easeOut(local) * 30 * scale * ray.reach;
-        const opacity = burst.reducedMotion ? 0.7 * (1 - progress) :
-          Math.min(1, local * 30 + 0.15) * Math.pow(1 - local, 0.85);
-        const appear = burst.reducedMotion ? 0.6 : 0.78 + Math.sin(local * Math.PI) * 0.25;
+        const travel = burst.reducedMotion ? 0 : easeOut(local) * BURST_CONFIG.glyph.travelDistance * scale * ray.reach;
+        const opacity = burst.reducedMotion ? BURST_CONFIG.animation.reducedOpacity * (1 - progress) :
+          Math.min(1, local * BURST_CONFIG.animation.opacityRamp + BURST_CONFIG.animation.opacityStart) *
+          Math.pow(1 - local, BURST_CONFIG.animation.opacityFalloff);
+        const appear = burst.reducedMotion ? BURST_CONFIG.animation.reducedAppear :
+          BURST_CONFIG.animation.appearBase + Math.sin(local * Math.PI) * BURST_CONFIG.animation.appearPulse;
         ctx.save();
         ctx.rotate(ray.angle);
-        ctx.translate(burst.radius + (ray.offset + 12) * scale + travel, 0);
+        ctx.translate(burst.radius + (ray.offset + BURST_CONFIG.glyph.baseDistance) * scale + travel, 0);
         // Each glyph's native +Y points back at the pocket. It keeps this
         // radial facing throughout flight, without random birth tilt or flips.
-        ctx.rotate(Math.PI / 2);
+        ctx.rotate(BURST_CONFIG.glyph.inwardRotation);
         ctx.scale(scale * ray.size * appear * ray.aspect, scale * ray.size * appear);
         ctx.globalAlpha = opacity;
         drawComicSymbol(ctx, ray.kind, burst.dark);
