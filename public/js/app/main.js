@@ -3,6 +3,7 @@ import { FilmRenderer } from '../rendering/renderer.js';
 import { PopAudio, BurstLayer } from '../audio/effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
+import { chooseComicSymbol } from '../core/comic-symbols.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
@@ -23,9 +24,7 @@ function chooseBrandAccent() {
     const saved=sessionStorage.getItem('bubble.brandAccent');
     if(saved!==null)previous=Number(saved);
   } catch { /* Storage may be unavailable. */ }
-  if(!Number.isInteger(previous)||previous<0||previous>3)previous=-1;
-  const choice=Math.floor(Math.random()*(previous===-1?4:3));
-  const kind=previous===-1||choice<previous?choice:choice+1;
+  const kind=chooseComicSymbol(previous);
   try { sessionStorage.setItem('bubble.brandAccent',String(kind)); } catch { /* Keep the current accent. */ }
   return kind;
 }

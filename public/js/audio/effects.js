@@ -1,4 +1,5 @@
 import { PopSequence, synthesizePop } from './sound.js';
+import { drawComicSymbol, sampleComicSymbols } from '../core/comic-symbols.js';
 
 // Short, dry plastic transients and perimeter-only comic accents.
 // Everything is generated locally: no audio download or external dependencies.
@@ -162,14 +163,12 @@ export class BurstLayer {
     const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.8);
     const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
     let angle = random() * TAU;
-    let previousKind = Math.floor(random() * 4);
-    const rays = gaps.map((gap) => {
-      const kind = reducedMotion ? 2 : (previousKind + 1 + Math.floor(random() * 3)) % 4;
-      previousKind = kind;
+    const kinds = sampleComicSymbols(count, random);
+    const rays = gaps.map((gap, index) => {
       const ray = {
         angle,
-        kind,
-        size: 1 + random() * 0.5,
+        kind: kinds[index],
+        size: 0.66 + random() * 0.32,
         aspect: 0.88 + random() * 0.24,
         flip: random() < 0.5 ? -1 : 1,
         tilt: (random() - 0.5) * 0.55,
@@ -177,10 +176,6 @@ export class BurstLayer {
         offset: 5 + random() * 5,
         delay: reducedMotion ? 0 : random() * 0.028,
         turn: reducedMotion ? 0 : (random() - 0.5) * 0.65,
-        detail: random() < 0.65,
-        detailOffset: 0.7 + random() * 0.6,
-        bend: 0.7 + random() * 0.6,
-        strokeCount: 1 + Math.floor(random() * 3),
       };
       angle += (gap / totalGap) * TAU;
       return ray;
@@ -202,7 +197,7 @@ export class BurstLayer {
       const scale = clamp(burst.radius / 40, 0.65, 1.65);
       ctx.save();
       ctx.translate(burst.x, burst.y);
-      // No accent can paint the bubble, including the final rotating stars.
+      // Keep even a rotating doodle outside the popped pocket.
       ctx.beginPath();
       ctx.rect(-this.width * 2, -this.height * 2, this.width * 4, this.height * 4);
       ctx.arc(0, 0, burst.radius * 1.045, 0, TAU);
@@ -216,29 +211,16 @@ export class BurstLayer {
         const appear = burst.reducedMotion ? 0.6 : 0.78 + Math.sin(local * Math.PI) * 0.25;
         ctx.save();
         ctx.rotate(ray.angle);
-        ctx.translate(burst.radius + ray.offset * scale + travel, 0);
+        ctx.translate(burst.radius + (ray.offset + 12) * scale + travel, 0);
         ctx.rotate(ray.tilt + ray.turn * local);
         ctx.scale(scale * ray.size * appear * ray.aspect, scale * ray.size * appear * ray.flip);
         ctx.globalAlpha = opacity;
-        ctx.lineJoin = 'round';
-        ctx.lineCap = 'round';
-        ctx.strokeStyle = burst.dark ? '#161b20' : '#293c4a';
-        ctx.fillStyle = burst.dark ? '#f4df9b' : '#f6cd64';
-        ctx.lineWidth = 1.15;
-
-        this.drawAccent(ctx, ray.kind, burst.dark, local, ray);
+        drawComicSymbol(ctx, ray.kind, burst.dark);
         ctx.restore();
       }
       ctx.restore();
     }
     return this.bursts.length > 0;
-  }
-
-  drawAccent(ctx, kind, dark, progress, ray) {
-    if (kind === 0) this.dart(ctx, ray);
-    else if (kind === 1) this.lightning(ctx, ray);
-    else if (kind === 2) this.strokes(ctx, dark, ray);
-    else this.star(ctx, dark, progress, ray);
   }
 
   drawBrandAccent(canvas, kind, dark) {
@@ -248,100 +230,9 @@ export class BurstLayer {
     canvas.width = Math.round(32 * dpr);
     canvas.height = Math.round(32 * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (kind === 1) {
-      // The logo uses an upright bolt; the burst keeps its wider side-facing ray.
-      ctx.translate(16, 3);
-      ctx.fillStyle = dark ? '#f4df9b' : '#f6cd64';
-      ctx.strokeStyle = dark ? '#161b20' : '#293c4a';
-      ctx.lineWidth = 1.15;
-      ctx.lineJoin = 'round';
-      ctx.beginPath();
-      ctx.moveTo(3, 0);
-      ctx.lineTo(-4, 13);
-      ctx.lineTo(1, 13);
-      ctx.lineTo(-3, 27);
-      ctx.lineTo(8, 10);
-      ctx.lineTo(2, 10);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      return;
-    }
-    ctx.translate(kind === 3 ? 9 : 4, kind === 0 ? 20 : 16);
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.strokeStyle = dark ? '#161b20' : '#293c4a';
-    ctx.fillStyle = dark ? '#f4df9b' : '#f6cd64';
-    ctx.lineWidth = 1.15;
-    this.drawAccent(ctx, kind, dark, 0, { bend: 1, strokeCount: 3, detail: false, turn: 0 });
-  }
-
-  dart(ctx, ray) {
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(18, -5 * ray.bend);
-    ctx.lineTo(16, 4 * ray.bend);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    if (ray.detail) {
-      ctx.beginPath();
-      ctx.moveTo(10, -7 * ray.detailOffset);
-      ctx.lineTo(21, -12 * ray.detailOffset);
-      ctx.strokeStyle = ctx.fillStyle;
-      ctx.lineWidth = 1.6;
-      ctx.stroke();
-    }
-  }
-
-  lightning(ctx, ray) {
-    ctx.beginPath();
-    ctx.moveTo(0, 1);
-    ctx.lineTo(10, -5 * ray.bend);
-    ctx.lineTo(10, -1);
-    ctx.lineTo(23, -6 * ray.bend);
-    ctx.lineTo(14, 5 * ray.bend);
-    ctx.lineTo(14, 1);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  }
-
-  strokes(ctx, dark, ray) {
-    ctx.strokeStyle = dark ? '#f6edd2' : '#3f515e';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(16, -0.6 * ray.bend);
-    if (ray.strokeCount > 1) {
-      ctx.moveTo(5, -5 * ray.bend);
-      ctx.lineTo(14, -7 * ray.bend);
-    }
-    if (ray.strokeCount > 2) {
-      ctx.moveTo(7, 5 * ray.bend);
-      ctx.lineTo(19, 7 * ray.bend);
-    }
-    ctx.stroke();
-  }
-
-  star(ctx, dark, progress, ray) {
-    ctx.translate(7, 0);
-    ctx.rotate(progress * ray.turn);
-    ctx.fillStyle = dark ? '#fff1c7' : '#ffdf88';
-    ctx.beginPath();
-    ctx.moveTo(0, -7 * ray.bend);
-    ctx.quadraticCurveTo(1.7, -1.5, 7, 0);
-    ctx.quadraticCurveTo(1.7, 1.5, 0, 7 * ray.bend);
-    ctx.quadraticCurveTo(-1.7, 1.5, -7, 0);
-    ctx.quadraticCurveTo(-1.7, -1.5, 0, -7 * ray.bend);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    if (ray.detail) {
-      ctx.beginPath();
-      ctx.arc(12 * ray.detailOffset, -8 * ray.detailOffset, 1.4, 0, TAU);
-      ctx.fill();
-    }
+    ctx.translate(16, 16);
+    ctx.scale(0.86, 0.86);
+    drawComicSymbol(ctx, kind, dark);
   }
 
   clear() {
