@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const output = path.join(root, 'artifacts');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const screenshotsOnly = process.argv.includes('--screenshots-only');
@@ -50,9 +50,9 @@ const report = { url: baseURL, generatedAt: new Date().toISOString(), browser: {
 const browser = await chromium.launch({ headless: true });
 report.browser.chromium = browser.version();
 report.browser.playwright = JSON.parse(await readFile(path.join(playwrightPath, 'package.json'), 'utf8')).version;
-const physics = await readFile(path.join(root, 'physics.js'), 'utf8');
+const physics = await readFile(path.join(root, 'public/js/core/physics.js'), 'utf8');
 const instrumentedPhysics = physics.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
-const rendererSource = await readFile(path.join(root, 'renderer.js'), 'utf8');
+const rendererSource = await readFile(path.join(root, 'public/js/rendering/renderer.js'), 'utf8');
 const instrumentedRenderer = rendererSource.replace('render(bubbles,layout,dark,time,light) {', `render(bubbles,layout,dark,time,light) {
     globalThis.__lastLight={...light}; globalThis.__filmRenderer=this;
     globalThis.__filmLayout=layout; globalThis.__filmDark=dark; globalThis.__filmTime=time;`);
@@ -64,8 +64,8 @@ async function context(options = {}) {
   const ctx = await browser.newContext(browserOptions);
   activeContexts.push(ctx);
   if(initScript) await ctx.addInitScript(initScript);
-  await ctx.route('**/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedPhysics }));
-  await ctx.route('**/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedRenderer }));
+  await ctx.route('**/js/core/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedPhysics }));
+  await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedRenderer }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push({ type: 'pageerror', message: error.message }));
   page.on('console', message => {
@@ -390,7 +390,7 @@ try {
   });
   await check('synthesized audio waveform is finite, brief and below clipping', async () => {
     const waveform = await page.evaluate(async () => {
-      const { PopAudio } = await import('./effects.js');
+      const { PopAudio } = await import('./js/audio/effects.js');
       const audio = new PopAudio();
       audio.context = new OfflineAudioContext(1, 6615, 49000);
       return [1089, 4207, 9817, 26131].map(seed => {
@@ -626,7 +626,7 @@ try {
     await writeFile(path.join(output, 'comparison.html'), `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Bubble — сравнение тем</title><style>*{box-sizing:border-box}body{margin:0;padding:28px;background:#d5dde2;font-family:system-ui;color:#25333d}h1{font-size:21px;font-weight:500;margin:0 0 8px}p{font-size:13px;margin:0 0 22px}section{display:flex;gap:24px;align-items:flex-start}figure{margin:0;width:390px}figcaption{font-size:12px;margin-bottom:10px}img{display:block;width:390px;height:auto;border-radius:12px}</style><h1>Пупырчатая плёнка · 3–4–3–4</h1><p>Одинаковые 14 пузырьков. Четыре лопнувших сохраняют форму в обеих темах.</p><section><figure><figcaption>Тёмная тема</figcaption><img src="mobile-dark-preview.png" alt="Тёмная тема с четырьмя лопнувшими пузырьками"></figure><figure><figcaption>Светлая тема</figcaption><img src="mobile-light-preview.png" alt="Светлая тема с теми же четырьмя лопнувшими пузырьками"></figure></section></html>`);
     const comparison = await page.context().newPage();
     await comparison.setViewportSize({ width: 860, height: 1100 });
-    await comparison.goto(new URL('artifacts/comparison.html', baseURL + '/').href);
+    await comparison.goto(pathToFileURL(path.join(output, 'comparison.html')).href);
     await comparison.locator('img').evaluateAll(images => Promise.all(images.map(img => img.decode())));
     const comparisonHeight = await comparison.evaluate(() => Math.ceil(document.body.getBoundingClientRect().height));
     await comparison.setViewportSize({ width: 860, height: comparisonHeight });

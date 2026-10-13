@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
-const root=path.dirname(fileURLToPath(import.meta.url));
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../public');
 const port=Number(process.env.BUBBLE_PORT||4174);
 const host=process.env.BUBBLE_HOST||'0.0.0.0';
 const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.json':'application/json; charset=utf-8','.md':'text/plain; charset=utf-8'};

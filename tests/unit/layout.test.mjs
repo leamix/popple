@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BUBBLE_COUNT, ROW_COUNTS, MAX_FILM_SCALE, FILM_GAP, STAGE_PADDING, createBubbleLayout } from './layout.js';
+import { BUBBLE_COUNT, ROW_COUNTS, MAX_FILM_SCALE, FILM_GAP, STAGE_PADDING, createBubbleLayout } from '../../public/js/core/layout.js';
 
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} should equal ${expected}`);
 

@@ -1,7 +1,7 @@
 // Analytic elastic membrane. Surface slopes drive the reflected studio lights;
 // the same height field provides the finger dent and the collapsed creases.
-import { makeMembrane } from './membrane.js';
-import { BUBBLE_COUNT } from './layout.js';
+import { makeMembrane } from '../core/membrane.js';
+import { BUBBLE_COUNT } from '../core/layout.js';
 const vertex = `
 attribute vec2 a_position;
 varying vec2 v_uv;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DeviceLighting, MAX_LIGHT_SHIFT, angleDifference, readOrientation, orientationLight } from './lighting.js';
+import { DeviceLighting, MAX_LIGHT_SHIFT, angleDifference, readOrientation, orientationLight } from '../../public/js/rendering/lighting.js';
 
 class Events {
   constructor() { this.listeners = new Map(); }

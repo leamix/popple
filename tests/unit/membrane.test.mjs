@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { makeMembrane } from './membrane.js';
+import { makeMembrane } from '../../public/js/core/membrane.js';
 
 test('edge contact leaves a local dent and a surviving lobe on the freer side', () => {
   for (let i = 0; i < 100; i++) {

@@ -1,8 +1,8 @@
-import { BubbleState, DEFAULT_HOLD_SECONDS } from './physics.js';
-import { FilmRenderer } from './renderer.js';
-import { PopAudio, BurstLayer } from './effects.js';
-import { BUBBLE_COUNT, createBubbleLayout } from './layout.js';
-import { DeviceLighting } from './lighting.js';
+import { BubbleState, DEFAULT_HOLD_SECONDS } from '../core/physics.js';
+import { FilmRenderer } from '../rendering/renderer.js';
+import { PopAudio, BurstLayer } from '../audio/effects.js';
+import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
+import { DeviceLighting } from '../rendering/lighting.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};

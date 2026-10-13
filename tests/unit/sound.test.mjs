@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { POP_FAMILIES, PopSequence, synthesizePop } from './sound.js';
-import { PopAudio } from './effects.js';
+import { POP_FAMILIES, PopSequence, synthesizePop } from '../../public/js/audio/sound.js';
+import { PopAudio } from '../../public/js/audio/effects.js';
 
 function measurements(sound) {
   const { samples, sampleRate } = sound;

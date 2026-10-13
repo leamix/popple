@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const root = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const output = path.join(root, 'artifacts');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const checkFilter = process.argv.find(arg => arg.startsWith('--check='))?.slice('--check='.length);
@@ -47,10 +47,10 @@ const report = { generatedAt: new Date().toISOString(), url: baseURL, browsers: 
   'Touch is emulated. No physical Android or iPhone motor is available; native iOS haptics cannot be verified here.',
   'Current iOS native switch feedback requires a trusted direct click and cannot accompany every held or sliding pop.',
 ] };
-const appSource = await readFile(path.join(root, 'app.js'), 'utf8');
+const appSource = await readFile(path.join(root, 'public/js/app/main.js'), 'utf8');
 const appInstrumented = appSource.replace('const audio=new PopAudio();', 'const audio=new PopAudio(); globalThis.__interactionAudio=audio;');
 assert.notEqual(appSource, appInstrumented);
-const physicsSource = await readFile(path.join(root, 'physics.js'), 'utf8');
+const physicsSource = await readFile(path.join(root, 'public/js/core/physics.js'), 'utf8');
 const physicsInstrumented = physicsSource.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
 assert.notEqual(physicsSource, physicsInstrumented);
 const contexts = [];
@@ -69,8 +69,8 @@ async function context(options = {}, targetBrowser = browser) {
       return true;
     } });
   }, { hold });
-  await ctx.route('**/app.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
-  await ctx.route('**/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: physicsInstrumented }));
+  await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
+  await ctx.route('**/js/core/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: physicsInstrumented }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });

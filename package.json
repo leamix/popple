@@ -2,5 +2,10 @@
   "name": "no-rush-bubble-study",
   "private": true,
   "type": "module",
-  "scripts": { "start": "node server.mjs", "test": "node --test *.test.mjs" }
+  "scripts": {
+    "start": "node scripts/server.mjs",
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:browser": "node tests/browser/browser.test.mjs",
+    "test:browser:interaction": "node tests/browser/friction-browser.test.mjs"
+  }
 }

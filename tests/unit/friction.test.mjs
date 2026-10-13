@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { synthesizeFriction } from './friction.js';
+import { synthesizeFriction } from '../../public/js/audio/friction.js';
 
 const rms = samples => Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
 

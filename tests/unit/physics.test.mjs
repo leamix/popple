@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BubbleState, DEFAULT_HOLD_SECONDS } from './physics.js';
+import { BubbleState, DEFAULT_HOLD_SECONDS } from '../../public/js/core/physics.js';
 
 function advance(bubble, seconds, frequency = 120) {
   let events = 0;
