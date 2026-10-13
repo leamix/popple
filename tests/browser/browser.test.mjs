@@ -212,8 +212,19 @@ try {
   await check('desktop renders fourteen pockets without the WebGL error state', async () => {
     assert.equal(await page.locator('.bubble-target').count(), 14);
     assert.equal(await page.locator('#render-error').isVisible(), false);
+    const fieldPadding = await page.evaluate(() => {
+      const stage = document.querySelector('.playground').getBoundingClientRect();
+      const pockets = __filmLayout;
+      return {
+        horizontal: Math.min(...pockets.map(p => p.x - p.radius)),
+        vertical: Math.min(...pockets.map(p => p.y - p.radius)),
+        width: stage.width,
+        height: stage.height,
+      };
+    });
+    assert.ok(fieldPadding.horizontal >= 64 && fieldPadding.vertical >= 64, 'Wide screens need a generous field margin around the bubbles.');
     await screenshot(page, 'desktop-dark.png');
-    return inspectStaggeredLayout(page);
+    return { fieldPadding, ...await inspectStaggeredLayout(page) };
   });
   await check('film keeps progress announcements for assistive technology without visual status copy', async () => {
     assert.equal(await page.locator('.below-film').count(), 0);
@@ -476,6 +487,7 @@ try {
     });
     assert.equal(presentation.motionUsesTiltSwitch, true);
     assert.deepEqual(presentation.stage, { x: 0, y: 0, ...presentation.viewport });
+    assert.equal(await mobile.locator('.sheet').evaluate(sheet => getComputedStyle(sheet).boxShadow), 'none');
     await mobile.locator('#theme').tap(); await mobile.waitForTimeout(200);
     await screenshot(mobile, 'mobile-light.png');
     return inspectStaggeredLayout(mobile);

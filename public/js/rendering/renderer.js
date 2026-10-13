@@ -154,12 +154,9 @@ vec3 environment(vec3 r, float roughness) {
   return mix(daylight,env,u_dark);
 }
 float sheetMask(vec2 pixel) {
-  vec2 p=pixel-u_resolution*.5;
-  // Match the slightly turned CSS backing, without a second opaque surface.
-  p=mat2(.999816,.019197,-.019197,.999816)*p;
-  vec2 d=abs(p)-(u_resolution*.5-vec2(36.));
-  float distance=length(max(d,0.))+min(max(d.x,d.y),0.)-15.;
-  return 1.-smoothstep(-.7,.7,distance);
+  // The connected film continues past the viewport. Clipping happens only at
+  // the browser edge, never in a smaller rounded rectangle inside the scene.
+  return 1.;
 }
 void drawSheet() {
   vec2 pixel=(v_uv*vec2(.5,-.5)+.5)*u_resolution;
@@ -170,16 +167,25 @@ void drawSheet() {
   // shallow ripples turn toward the light. No repeated grid or all-over haze.
   float wave=p.x*.72+p.y+.030*sin(p.x*12.+p.y*5.)+.017*sin(p.y*19.-p.x*8.);
   wave+=u_light.x*.7-u_light.y*.5;
-  float broken=smoothstep(.30,.78,noise(p*vec2(5.,9.)));
-  float ribbon=exp(-sq((wave-.56)/.009))*.30;
-  ribbon+=exp(-sq((wave-1.17)/.012))*.22;
-  float bloom=exp(-sq((wave-.56)/.035))*.035+exp(-sq((wave-1.17)/.046))*.03;
+  float broken=smoothstep(.24,.82,noise(p*vec2(5.,9.)));
+  // Several independent-looking window bands keep the connected background
+  // alive, rather than concentrating all of its movement in one stripe.
+  float ribbon=exp(-sq((wave-.18)/.011))*.25;
+  ribbon+=exp(-sq((wave-.66)/.010))*.34;
+  ribbon+=exp(-sq((wave-1.23)/.013))*.29;
+  ribbon+=exp(-sq((wave-1.82)/.011))*.25;
+  ribbon+=exp(-sq((wave-2.34)/.014))*.20;
+  float bloom=exp(-sq((wave-.18)/.046))*.025;
+  bloom+=exp(-sq((wave-.66)/.040))*.050;
+  bloom+=exp(-sq((wave-1.23)/.052))*.042;
+  bloom+=exp(-sq((wave-1.82)/.048))*.032;
+  bloom+=exp(-sq((wave-2.34)/.060))*.024;
   float exposed=1.;
   for(int i=0;i<${BUBBLE_COUNT};i++) {
     float distance=length(pixel-u_sites[i].xy)/u_sites[i].z;
     exposed*=smoothstep(1.02,1.13,distance);
   }
-  float alpha=(ribbon*broken+bloom)*sheetMask(pixel)*exposed*mix(1.,.20,u_dark);
+  float alpha=(ribbon*(.32+.68*broken)+bloom)*sheetMask(pixel)*exposed*mix(1.,.30,u_dark);
   gl_FragColor=vec4(vec3(alpha),alpha);
 }
 void main() {

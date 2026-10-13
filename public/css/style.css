@@ -112,7 +112,7 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
   .wordmark { font-size: 24px; }
   .intro-title { font-size: clamp(24px, 8.3vw, 30px); }
   .playground { position: fixed; inset: 0; z-index: 1; margin: 0; }
-  .sheet { inset: 0; border-radius: 0; transform: none; }
+  .sheet { inset: 0; border-radius: 0; box-shadow: none; transform: none; }
 }
 @media (max-height: 760px) {
   .topbar { height: 65px; }

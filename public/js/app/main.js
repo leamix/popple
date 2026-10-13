@@ -125,13 +125,14 @@ function resize() {
   cancelAll();effects.clear();
   const geometry=createBubbleLayout(window.innerWidth,diameter);
   const fullViewport=matchMedia('(max-width: 540px)').matches;
-  const width=fullViewport?window.innerWidth:geometry.width;
-  const height=fullViewport?window.innerHeight:geometry.height;
-  const offsetX=fullViewport?(width-geometry.width)/2:0;
-  const offsetY=fullViewport?(height-geometry.height)/2:0;
+  const fieldPadding=fullViewport?0:64;
+  const width=fullViewport?window.innerWidth:geometry.width+fieldPadding*2;
+  const height=fullViewport?window.innerHeight:geometry.height+fieldPadding*2;
+  const offsetX=fullViewport?(width-geometry.width)/2:fieldPadding;
+  const offsetY=fullViewport?(height-geometry.height)/2:fieldPadding;
   const actualDiameter=geometry.diameter;
   const stage=$('.playground');stage.style.width=width+'px';stage.style.height=height+'px';
-  layout=fullViewport?geometry.layout.map(p=>({...p,x:p.x+offsetX,y:p.y+offsetY})):geometry.layout;
+  layout=geometry.layout.map(p=>({...p,x:p.x+offsetX,y:p.y+offsetY}));
   for(let i=0;i<buttons.length;i++) {
     const p=layout[i],button=buttons[i];
     Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
