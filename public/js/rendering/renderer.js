@@ -85,13 +85,11 @@ float heightAt(vec2 p) {
       float across=dot(slack,vec2(-fold.y,fold.x));
       float line=across-fold.z-profile.y*along*along;
       float taper=smoothstep(-.96,-.55,along)*(1.-smoothstep(profile.z,.98,along));
-      // Slack plastic makes broad facets on either side of a rounded crease.
-      // Mixing a roof profile with the bend avoids uniformly smooth tubes.
-      float roof=max(0.,1.-sqrt(line*line+.0001)/(fold.w*4.4));
-      roof*=smoothstep(0.,.10,roof);
-      float ridge=mix(exp(-sq(line/fold.w)),roof,.82);
+      // A rounded ridge and adjacent concave valley bend reflections smoothly.
+      // Planar shoulders would turn the slack film into broad, rigid stripes.
+      float ridge=exp(-sq(line/fold.w));
       float valley=exp(-sq((line+fold.w*1.7)/(fold.w*2.2)));
-      collapsedHeight+=(ridge-valley*.16)*profile.x*taper*(1.-knead*1.6*contactFalloff);
+      collapsedHeight+=(ridge-valley*.42)*profile.x*taper*(1.-knead*1.6*contactFalloff);
     }
     // Supported film stops against the backing; pressing cannot push it through.
     float supportedHeight=min(collapsedHeight,.012);
