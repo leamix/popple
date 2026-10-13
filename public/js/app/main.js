@@ -124,9 +124,14 @@ function cancelAll() {
 function resize() {
   cancelAll();effects.clear();
   const geometry=createBubbleLayout(window.innerWidth,diameter);
-  const {width,height,diameter:actualDiameter}=geometry;
+  const fullViewport=matchMedia('(max-width: 540px)').matches;
+  const width=fullViewport?window.innerWidth:geometry.width;
+  const height=fullViewport?window.innerHeight:geometry.height;
+  const offsetX=fullViewport?(width-geometry.width)/2:0;
+  const offsetY=fullViewport?(height-geometry.height)/2:0;
+  const actualDiameter=geometry.diameter;
   const stage=$('.playground');stage.style.width=width+'px';stage.style.height=height+'px';
-  layout=geometry.layout;
+  layout=fullViewport?geometry.layout.map(p=>({...p,x:p.x+offsetX,y:p.y+offsetY})):geometry.layout;
   for(let i=0;i<buttons.length;i++) {
     const p=layout[i],button=buttons[i];
     Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
@@ -189,7 +194,11 @@ playground.addEventListener('pointerdown',event=>{
 });
 playground.addEventListener('pointermove',movePointer);
 playground.addEventListener('pointerup',event=>{audio.unlock();releasePointer(event.pointerId);wake();});
-playground.addEventListener('pointercancel',event=>{releasePointer(event.pointerId);wake();});
+playground.addEventListener('pointercancel',event=>{
+  // Some mobile browsers dispatch pointercancel before touchcancel. Touch input
+  // is keyed separately to avoid duplicate pointer and touch press handling.
+  releasePointer(event.pointerType==='touch'?'touch:'+event.pointerId:event.pointerId);wake();
+});
 playground.addEventListener('lostpointercapture',event=>{releasePointer(event.pointerId);wake();});
 buttons.forEach((button,i)=>{
   button.addEventListener('keydown',event=>{

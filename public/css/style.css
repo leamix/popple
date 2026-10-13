@@ -83,8 +83,7 @@ html[data-theme="light"] .ios-switch input:checked + .switch-track { background:
 .ios-switch input:disabled + .switch-track { opacity: .55; }
 .permission-button { min-height: 44px; margin-top: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 22px; background: transparent; font-size: 12px; transition: background 150ms ease-out; }
 .tilt-status:empty { display: none; }
-.motion-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; font-size: 13px; }
-.motion-label input { width: 19px; height: 19px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.motion-setting { margin-bottom: 0; }
 .settings-footer { margin: 20px 0 0; color: var(--muted); font-size: 11px; text-align: center; line-height: 1.6; }
 @media (prefers-reduced-motion: no-preference) { .settings-dialog[open] { animation: settings-enter 180ms ease-out; } @keyframes settings-enter { from { opacity: .6; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } } }
 html[data-reduced="true"] .settings-dialog { animation: none; }
@@ -106,18 +105,21 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
 .t-icon-swap[data-state="a"] .t-icon[data-icon="b"],
 .t-icon-swap[data-state="b"] .t-icon[data-icon="a"] { opacity: 0; filter: blur(var(--icon-swap-blur)); transform: scale(var(--icon-swap-start-scale)); }
 @media (max-width: 540px) {
-  .topbar { height: 78px; padding: env(safe-area-inset-top) 24px 0; }
+  body { min-height: 100dvh; }
+  .topbar { position: relative; z-index: 4; height: 78px; padding: env(safe-area-inset-top) 24px 0; }
   main { padding-top: 23px; }
+  .intro { position: relative; z-index: 4; }
   .wordmark { font-size: 24px; }
   .intro-title { font-size: clamp(24px, 8.3vw, 30px); }
-  .playground { margin-top: 25px; }
+  .playground { position: fixed; inset: 0; z-index: 1; margin: 0; }
+  .sheet { inset: 0; border-radius: 0; transform: none; }
 }
 @media (max-height: 760px) {
   .topbar { height: 65px; }
   main { padding-top: 8px; padding-bottom: 20px; }
   .eyebrow { margin-bottom: 11px; }
-  .playground { margin-top: 14px; }
 }
+@media (min-width: 541px) and (max-height: 760px) { .playground { margin-top: 14px; } }
 @media (max-width: 360px) { .topbar { padding-left: 16px; padding-right: 16px; } .topbar-actions { gap: 6px; } .intro { padding-inline: 16px; } .settings-dialog { padding: 20px; } .settings-header h2 { font-size: 19px; } }
 @media (prefers-reduced-motion: reduce) {
   .t-icon-swap .t-icon { transition: none !important; }

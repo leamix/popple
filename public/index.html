@@ -77,7 +77,15 @@
       <p id="tilt-status" class="tilt-status" role="status"></p>
       <button id="tilt-permission" class="permission-button" type="button" hidden>Разрешить доступ</button>
     </div>
-    <label class="motion-label"><span>Меньше эффектов</span><input id="motion" type="checkbox"></label>
+    <div class="settings-field motion-setting">
+      <div class="tilt-row">
+        <span id="motion-label">Меньше эффектов</span>
+        <label class="ios-switch">
+          <input id="motion" type="checkbox" role="switch" aria-labelledby="motion-label">
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+    </div>
     <p class="settings-footer">Настройки сохраняются сами.</p>
   </dialog>
   <script type="module" src="./js/app/main.js"></script>

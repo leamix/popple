@@ -335,26 +335,31 @@ try {
   for (const cancellation of ['pointercancel', 'lostpointercapture', 'move-away']) {
     await check(`${cancellation} cancels an incomplete hold`, async () => {
       await reset(page);
-      const p = await center(page);
-      await page.mouse.move(p.x, p.y); await page.mouse.down();
-      await page.waitForTimeout(200);
-      // First flush the initial pending capture so there is an actual capture
-      // to lose; releasing before gotpointercapture produces no lost event.
-      if (cancellation === 'lostpointercapture') await page.mouse.move(p.x + 1, p.y);
-      if (cancellation === 'move-away') {
-        const next=await center(page,5);
-        await page.mouse.move((p.x+next.x)/2,p.y);
+      await page.evaluate(() => __bubbleStates[4].setHoldDuration(1));
+      try {
+        const p = await center(page);
+        await page.mouse.move(p.x, p.y); await page.mouse.down();
+        await page.waitForTimeout(200);
+        // First flush the initial pending capture so there is an actual capture
+        // to lose; releasing before gotpointercapture produces no lost event.
+        if (cancellation === 'lostpointercapture') await page.mouse.move(p.x + 1, p.y);
+        if (cancellation === 'move-away') {
+          const next=await center(page,5);
+          await page.mouse.move((p.x+next.x)/2,p.y);
+        }
+        else await page.locator('.bubble-target').nth(4).evaluate((button, type) => {
+          if (type === 'lostpointercapture') button.releasePointerCapture(1);
+          else button.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));
+        }, cancellation);
+        // Pointer capture changes are delivered when the next pointer event is
+        // processed. A real movement flushes that pending browser transition.
+        if (cancellation === 'lostpointercapture') await page.mouse.move(p.x + 2, p.y);
+        await page.waitForTimeout(950); await page.mouse.up();
+        assert.equal(await count(page), 0);
+        assert.equal(await page.evaluate(() => __bubbleStates[4].active), false);
+      } finally {
+        await page.evaluate(() => __bubbleStates[4].setHoldDuration(.3));
       }
-      else await page.locator('.bubble-target').nth(4).evaluate((button, type) => {
-        if (type === 'lostpointercapture') button.releasePointerCapture(1);
-        else button.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1, pointerType: 'mouse' }));
-      }, cancellation);
-      // Pointer capture changes are delivered when the next pointer event is
-      // processed. A real movement flushes that pending browser transition.
-      if (cancellation === 'lostpointercapture') await page.mouse.move(p.x + 2, p.y);
-      await page.waitForTimeout(950); await page.mouse.up();
-      assert.equal(await count(page), 0);
-      assert.equal(await page.evaluate(() => __bubbleStates[4].active), false);
     });
   }
   for (const key of ['Space', 'Enter']) {
@@ -446,14 +451,31 @@ try {
     await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await reset(mobile);
   });
   await check('touch cancellation stops a hold', async () => {
-    const p = await center(mobile);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...p, id: 1, force: .5 }] });
-    await mobile.waitForTimeout(200);
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
-    await mobile.waitForTimeout(900); assert.equal(await count(mobile), 0);
+    await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(1));
+    try {
+      const p = await center(mobile);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...p, id: 1, force: .5 }] });
+      await mobile.waitForTimeout(200);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+      await mobile.waitForTimeout(900); assert.equal(await count(mobile), 0);
+    } finally {
+      await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(.3));
+    }
   });
   await check('390px mobile layout fits and can switch to light', async () => {
     assert.ok(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    const presentation = await mobile.evaluate(() => {
+      const motion = document.querySelector('#motion');
+      const stage = document.querySelector('.playground').getBoundingClientRect();
+      return {
+        motionUsesTiltSwitch: motion.getAttribute('role') === 'switch'
+          && motion.closest('.ios-switch')?.querySelector('.switch-track') !== null,
+        stage: { x: stage.x, y: stage.y, width: stage.width, height: stage.height },
+        viewport: { width: innerWidth, height: innerHeight },
+      };
+    });
+    assert.equal(presentation.motionUsesTiltSwitch, true);
+    assert.deepEqual(presentation.stage, { x: 0, y: 0, ...presentation.viewport });
     await mobile.locator('#theme').tap(); await mobile.waitForTimeout(200);
     await screenshot(mobile, 'mobile-light.png');
     return inspectStaggeredLayout(mobile);
@@ -464,7 +486,10 @@ try {
     await mobile.locator('#size').fill('100');
     assert.ok(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     const bounds = await mobile.locator('.playground').boundingBox();
-    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 320);
+    assert.equal(bounds.x, 0);
+    assert.equal(bounds.y, 0);
+    assert.equal(bounds.width, await mobile.evaluate(() => innerWidth));
+    assert.equal(bounds.height, await mobile.evaluate(() => innerHeight));
     await screenshot(mobile, 'mobile-320-light.png');
     await mobile.locator('#settings-close').tap();
     return { bounds, ...await inspectStaggeredLayout(mobile) };
