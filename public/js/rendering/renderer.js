@@ -299,9 +299,11 @@ void main() {
   float farSide=pow(max(0.,dot(direction,exitDirection)),mix(3.6,6.,u_dark));
   float returnLight=exp(-sq((r-mix(.78,.82,u_dark))/mix(.19,.14,u_dark)))*farSide;
   float returnEdge=exp(-sq((r-mix(.915,.955,u_dark))/mix(.070,.043,u_dark)))*farSide;
+  float returnStrength=1.-c*.92;
   // A directional return through the thin wall lights a wide patch inside
-  // the opposite shoulder. This is an optical approximation, not ray tracing.
-  spec+=vec3(1.)*(returnLight*mix(.50,.16,u_dark)+returnEdge*mix(.68,.37,u_dark))*body*(1.-c*.55);
+  // the opposite shoulder. Vented film retains only a faint trace of this
+  // dome-shaped glow. This is an optical approximation, not ray tracing.
+  spec+=vec3(1.)*(returnLight*mix(.50,.16,u_dark)+returnEdge*mix(.68,.37,u_dark))*body*returnStrength;
   float shoulder=exp(-sq((r-.958)/.022))*body;
   float shoulderLight=pow(max(0.,dot(normalize(turn(vec2(-.7,.8),u_light_angle)),direction)),5.);
   spec+=vec3(.84,.94,1.)*shoulder*(.06+.30*shoulderLight)*(1.-c*.75)*mix(.22,1.,u_dark);
@@ -334,7 +336,7 @@ void main() {
   shadowA+=(1.-u_dark)*(rimOcclusion*.10+body*pow(1.-normal.z,3.)*.025+c*body*(1.-normal.z)*.035);
   // A shallow transition leaves the full contour and volume visible beneath
   // the broad return. The background pool and its shadow are drawn separately.
-  float returnShade=exp(-sq((r-.70)/.15))*farSide*body*(1.-c*.55);
+  float returnShade=exp(-sq((r-.70)/.15))*farSide*body*returnStrength;
   shadowA+=(1.-u_dark)*returnShade*.055;
   float alpha=clamp(specMax+(coat+shadowA)*(1.-specMax),0.,1.);
   float transmissionLight=mix(.79+shade*.25,.92+shade*.08,u_dark);
