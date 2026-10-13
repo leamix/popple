@@ -227,7 +227,7 @@ try {
       return {
         filmIsInsideSheet: sheet.contains(document.querySelector('#film')),
         targetsAreInsideSheet: sheet.contains(document.querySelector('#targets')),
-        burstsAreInsideSheet: sheet.contains(document.querySelector('#bursts')),
+        burstsAreOutsideSheet: !sheet.contains(document.querySelector('#bursts')),
         overflow: getComputedStyle(sheet).overflow,
         transform: getComputedStyle(sheet).transform,
       };
@@ -235,10 +235,10 @@ try {
     assert.deepEqual(filmMask, {
       filmIsInsideSheet: true,
       targetsAreInsideSheet: true,
-      burstsAreInsideSheet: true,
+      burstsAreOutsideSheet: true,
       overflow: 'hidden',
       transform: 'none',
-    }, 'The unrotated film field is the clipping parent for every visual layer.');
+    }, 'The unrotated film field clips the film and pockets, while burst effects remain free.');
     assert.ok(fieldPadding.horizontal >= 48 && fieldPadding.horizontal < 52, 'Desktop keeps a compact horizontal margin around the bubbles.');
     assert.ok(fieldPadding.vertical >= 48 && fieldPadding.vertical < 52, 'Desktop keeps a compact vertical margin around the bubbles.');
     await screenshot(page, 'desktop-dark.png');
