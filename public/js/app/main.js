@@ -4,6 +4,7 @@ import { PopAudio, BurstLayer } from '../audio/effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
 import { APP_CONFIG } from '../core/config.js';
+import { advanceBrandAccent } from './brand-accent.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
@@ -263,6 +264,7 @@ $('#reset').addEventListener('click',()=>{
   bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
   hapticTargets.forEach(input=>{input.checked=false;});
   buttons.forEach((button,i)=>{button.dataset.popped='false';button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
+  advanceBrandAccent();
   $('#announcement').textContent=`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 });
 audio.setEnabled(storage.get('sound','true')==='true');

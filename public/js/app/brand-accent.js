@@ -2,6 +2,7 @@ import { COMIC_SYMBOLS, drawComicSymbol } from '../core/comic-symbols.js';
 import { BRAND_CONFIG } from '../core/config.js';
 
 const STAR_ID = 'legacy-star';
+let advance = () => {};
 
 // The burst may still use the complete approved catalogue. The small star
 // disappears only from the wordmark, where it is too slight to read.
@@ -16,6 +17,10 @@ export function chooseBrandAccent(previous = -1, random = Math.random) {
   const count = BRAND_SYMBOL_INDICES.length - (previousPosition >= 0 ? 1 : 0);
   const choice = clampChoice(random(), count);
   return BRAND_SYMBOL_INDICES[previousPosition >= 0 && choice >= previousPosition ? choice + 1 : choice];
+}
+
+export function advanceBrandAccent() {
+  advance();
 }
 
 export function drawBrandAccent(canvas, kind, dark, dpr = globalThis.devicePixelRatio || 1) {
@@ -41,10 +46,18 @@ function initializeBrandAccent() {
     const saved = sessionStorage.getItem('bubble.brandAccent');
     if (saved !== null) previous = Number(saved);
   } catch { /* Storage can be unavailable without affecting the logo. */ }
-  const kind = chooseBrandAccent(previous);
-  try { sessionStorage.setItem('bubble.brandAccent', String(kind)); } catch { /* Keep the current accent. */ }
+  let kind = chooseBrandAccent(previous);
+  const persist = () => {
+    try { sessionStorage.setItem('bubble.brandAccent', String(kind)); } catch { /* Keep the current accent. */ }
+  };
+  persist();
   const render = () => drawBrandAccent(canvas, kind, document.documentElement.dataset.theme !== 'light');
   render();
+  advance = () => {
+    kind = chooseBrandAccent(kind);
+    persist();
+    render();
+  };
   new MutationObserver(render).observe(document.documentElement, {
     attributes: true,
     attributeFilter: ['data-theme'],

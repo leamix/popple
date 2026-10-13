@@ -310,6 +310,13 @@ try {
     return {held,moved,released};
   });
   await check('reset restores all fourteen pockets', () => reset(page));
+  await check('«Ещё» changes the logo accent without repeating it', async () => {
+    const previous = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+    assert.notEqual(previous, null);
+    await page.locator('#reset').click();
+    await page.waitForTimeout(100);
+    assert.notEqual(await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent')), previous);
+  });
   await check('three icon controls and modal support focus, escape, backdrop and saved timing', async () => {
     assert.equal(await page.locator('.topbar-actions > button').count(),3);
     assert.equal((await page.locator('#theme').textContent()).trim(),'');
