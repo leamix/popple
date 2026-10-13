@@ -3,7 +3,6 @@ import { FilmRenderer } from '../rendering/renderer.js';
 import { PopAudio, BurstLayer } from '../audio/effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
-import { chooseComicSymbol } from '../core/comic-symbols.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
@@ -18,17 +17,6 @@ const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
 const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i,savedHold));
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
-function chooseBrandAccent() {
-  let previous=-1;
-  try {
-    const saved=sessionStorage.getItem('bubble.brandAccent');
-    if(saved!==null)previous=Number(saved);
-  } catch { /* Storage may be unavailable. */ }
-  const kind=chooseComicSymbol(previous);
-  try { sessionStorage.setItem('bubble.brandAccent',String(kind)); } catch { /* Keep the current accent. */ }
-  return kind;
-}
-const brandAccent=chooseBrandAccent();
 const playground=$('.playground');
 const pointers=new Map();
 const rawTouchEvents='ontouchstart' in window;
@@ -145,7 +133,6 @@ function resize() {
 }
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
-  effects.drawBrandAccent($('#brand-accent'),brandAccent,dark);
   $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
   $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';

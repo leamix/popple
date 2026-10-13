@@ -159,7 +159,7 @@ export class BurstLayer {
     if (!this.context) return;
     const random = randomFrom(++this.serial * 9817);
     const count = Math.min(COMIC_SYMBOLS.length,
-      reducedMotion ? 3 + Math.floor(random() * 3) : 7 + Math.floor(random() * 5));
+      reducedMotion ? 3 + Math.floor(random() * 3) : 5 + Math.floor(random() * 3));
     // Irregular gaps keep accents apart without creating the same radial stamp.
     const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.8);
     const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
@@ -221,18 +221,6 @@ export class BurstLayer {
       ctx.restore();
     }
     return this.bursts.length > 0;
-  }
-
-  drawBrandAccent(canvas, kind, dark) {
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    const dpr = clamp(globalThis.devicePixelRatio || 1, 1, 3);
-    canvas.width = Math.round(32 * dpr);
-    canvas.height = Math.round(32 * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.translate(16, 16);
-    ctx.scale(0.86, 0.86);
-    drawComicSymbol(ctx, kind, dark);
   }
 
   clear() {

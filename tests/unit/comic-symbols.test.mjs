@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { BurstLayer } from '../../public/js/audio/effects.js';
 import { COMIC_SYMBOLS, chooseComicSymbol } from '../../public/js/core/comic-symbols.js';
 
+const brandAccentModule = await import('../../public/js/app/brand-accent.js').catch(() => null);
+
 function createLayer(context = {}) {
   const layer = new BurstLayer({
     style: {},
@@ -24,6 +26,19 @@ test('a pop uses a varied group of distinct manga symbols', () => {
     rays.forEach(ray => seen.add(ray.kind));
   }
   assert.equal(seen.size, COMIC_SYMBOLS.length, 'Repeated pops should use the complete approved catalogue.');
+});
+
+test('a normal-motion pop stays airy with five to seven distinct symbols', () => {
+  const layer = createLayer();
+  for (let serial = 1; serial <= 80; serial++) {
+    layer.serial = serial;
+    layer.burst(100, 100, 40);
+    const rays = layer.bursts.at(-1).rays;
+    assert.ok(rays.length >= 5 && rays.length <= 7,
+      `Normal motion must use 5–7 symbols, received ${rays.length}.`);
+    assert.equal(new Set(rays.map(ray => ray.kind)).size, rays.length,
+      'A smaller burst must still not repeat a symbol.');
+  }
 });
 
 test('the rejected questions, sweat, moving puff and arrows are absent from bursts and logo choices', () => {
@@ -62,6 +77,60 @@ test('reloading can select every other logo symbol without repeating the previou
   for (const previous of [-1, 100, NaN]) {
     assert.equal(chooseComicSymbol(previous, () => 0), 0);
     assert.equal(chooseComicSymbol(previous, () => 0.999), COMIC_SYMBOLS.length - 1);
+  }
+});
+
+test('the logo excludes the tiny legacy star while retaining varied non-repeating accents', () => {
+  assert.ok(brandAccentModule, 'The logo needs an independently loadable accent module.');
+  const { BRAND_SYMBOL_INDICES, chooseBrandAccent } = brandAccentModule;
+  const star = COMIC_SYMBOLS.findIndex(symbol => symbol.id === 'legacy-star');
+  assert.equal(BRAND_SYMBOL_INDICES.includes(star), false, 'The tiny star is not a logo candidate.');
+  for (const previous of BRAND_SYMBOL_INDICES) {
+    const choices = new Set();
+    for (let step = 0; step < BRAND_SYMBOL_INDICES.length * 10; step++) {
+      choices.add(chooseBrandAccent(previous, () => step / (BRAND_SYMBOL_INDICES.length * 10)));
+    }
+    assert.equal(choices.size, BRAND_SYMBOL_INDICES.length - 1);
+    assert.equal(choices.has(previous), false);
+    assert.equal(choices.has(star), false);
+  }
+});
+
+test('the logo glyph points its native lower side left towards the wordmark', () => {
+  assert.ok(brandAccentModule, 'The logo needs an independently loadable accent module.');
+  const { BRAND_SYMBOL_INDICES, drawBrandAccent } = brandAccentModule;
+  const OriginalPath2D = globalThis.Path2D;
+  globalThis.Path2D = class { constructor(data) { this.data = data; } };
+  try {
+    let matrix = [1, 0, 0, 1, 0, 0];
+    const drawings = [];
+    const context = {
+      setTransform(a, b, c, d, e, f) { matrix = [a, b, c, d, e, f]; },
+      translate(x, y) {
+        const [a, b, c, d, e, f] = matrix;
+        matrix = [a, b, c, d, e + a * x + c * y, f + b * x + d * y];
+      },
+      rotate(angle) {
+        const [a, b, c, d, e, f] = matrix, cosine = Math.cos(angle), sine = Math.sin(angle);
+        matrix = [a * cosine + c * sine, b * cosine + d * sine,
+          c * cosine - a * sine, d * cosine - b * sine, e, f];
+      },
+      scale(x, y) {
+        const [a, b, c, d, e, f] = matrix;
+        matrix = [a * x, b * x, c * y, d * y, e, f];
+      },
+      fill() { drawings.push([...matrix]); },
+      stroke() { drawings.push([...matrix]); },
+    };
+    drawBrandAccent({ getContext() { return context; } }, BRAND_SYMBOL_INDICES[0], true, 1);
+    assert.ok(drawings.length > 0, 'The logo symbol should draw immediately on its own canvas.');
+    for (const [, , c, d] of drawings) {
+      assert.ok(c < -0.8 && Math.abs(d) < 1e-10,
+        `Native +Y (the lower side) must point left; received (${c}, ${d}).`);
+    }
+  } finally {
+    if (OriginalPath2D === undefined) delete globalThis.Path2D;
+    else globalThis.Path2D = OriginalPath2D;
   }
 });
 
