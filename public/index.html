@@ -41,10 +41,11 @@
       </div>
     </div>
     <section class="playground" aria-label="Пупырчатая плёнка">
-      <div class="sheet" id="sheet" aria-hidden="true"></div>
-      <canvas id="film" aria-hidden="true"></canvas>
-      <div id="targets" class="targets"></div>
-      <canvas id="bursts" aria-hidden="true"></canvas>
+      <div class="sheet" id="sheet">
+        <canvas id="film" aria-hidden="true"></canvas>
+        <div id="targets" class="targets"></div>
+        <canvas id="bursts" aria-hidden="true"></canvas>
+      </div>
       <p id="render-error" class="render-error" hidden>Не удалось включить графику. Попробуй открыть страницу в Safari или Chrome.</p>
     </section>
     <p class="sr-only" id="announcement" aria-live="polite" aria-atomic="true"></p>

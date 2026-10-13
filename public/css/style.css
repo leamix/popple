@@ -33,12 +33,10 @@ main { display: flex; flex-direction: column; align-items: center; padding: 13px
 .intro-title { display: flex; align-items: baseline; justify-content: center; gap: .38em; white-space: nowrap; font-size: clamp(30px, 4.4vw, 42px); font-weight: 450; line-height: 1.18; letter-spacing: -.043em; }
 h1 { margin: 0; font: inherit; }
 .playground { position: relative; width: 360px; height: 360px; margin: 23px 0 0; flex-shrink: 0; isolation: isolate; touch-action: none; overscroll-behavior: none; -webkit-touch-callout: none; }
-.sheet { position: absolute; inset: 21px; border-radius: 17px 13px 19px 14px; background: linear-gradient(125deg, #dae8ed08, #c4dae203 37%, #cadce605 62%, #e5f6fd08); box-shadow: inset 0 0 0 .5px #e8f4ff18, 1px 3px 8px #00000025, inset 0 0 9px #ffffff03; transform: rotate(-1.1deg); }
-.sheet::after { content: ""; position: absolute; inset: 0; border-radius: inherit; opacity: .20; background: repeating-linear-gradient(174deg, transparent 0 33px, #bbc9d008 34px, transparent 36px 52px), repeating-linear-gradient(87deg, transparent 0 67px, #e4efff12 68px, transparent 69px 97px); }
-html[data-theme="light"] .sheet { background: linear-gradient(125deg,#ffffff03,#bdcfdb01 38%,#ffffff08); box-shadow: inset 0 0 0 .5px #ffffff70, 1px 2px 3px #4765790c; }
-html[data-theme="light"] .sheet::after { opacity: 0; }
+.sheet { position: absolute; inset: 0; overflow: hidden; border: 1px solid #e8f4ff18; border-radius: 16px; background: #0c1114; box-shadow: 0 2px 7px #00000022; }
+html[data-theme="light"] .sheet { border-color: #ffffff70; background: #e8f1f6; box-shadow: 0 2px 4px #4765790c; }
 #film, #bursts, .targets { position: absolute; inset: 0; width: 100%; height: 100%; }
-#film { pointer-events: none; clip-path: inset(21px round 17px 13px 19px 14px); }
+#film { pointer-events: none; }
 #bursts { pointer-events: none; z-index: 3; inset: -80px; width: calc(100% + 160px); height: calc(100% + 160px); }
 .bubble-target { position: absolute; border: 0; border-radius: 50%; background: transparent; padding: 0; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; cursor: pointer; }
 .bubble-haptic { position: absolute; margin: 0; opacity: 0; z-index: 1; clip-path: circle(50%); touch-action: none; cursor: pointer; }
@@ -112,8 +110,7 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
   .wordmark { font-size: 24px; }
   .intro-title { font-size: clamp(24px, 8.3vw, 30px); }
   .playground { position: fixed; inset: 0; z-index: 1; margin: 0; }
-  .sheet { inset: 0; border-radius: 0; box-shadow: none; transform: none; }
-  #film { clip-path: none; }
+  .sheet { border: 0; border-radius: 0; box-shadow: none; }
 }
 @media (max-height: 760px) {
   .topbar { height: 65px; }

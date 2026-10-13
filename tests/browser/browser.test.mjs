@@ -222,10 +222,25 @@ try {
         height: stage.height,
       };
     });
-    assert.ok(fieldPadding.horizontal >= 64 && fieldPadding.horizontal < 70, 'Desktop keeps a compact horizontal margin around the bubbles.');
-    assert.ok(fieldPadding.vertical >= 64 && fieldPadding.vertical < 70, 'Desktop keeps a compact vertical margin around the bubbles.');
-    assert.equal(await page.locator('#film').evaluate(film => getComputedStyle(film).clipPath !== 'none'), true,
-      'Desktop reflections stay clipped inside the film field.');
+    const filmMask = await page.evaluate(() => {
+      const sheet = document.querySelector('#sheet');
+      return {
+        filmIsInsideSheet: sheet.contains(document.querySelector('#film')),
+        targetsAreInsideSheet: sheet.contains(document.querySelector('#targets')),
+        burstsAreInsideSheet: sheet.contains(document.querySelector('#bursts')),
+        overflow: getComputedStyle(sheet).overflow,
+        transform: getComputedStyle(sheet).transform,
+      };
+    });
+    assert.deepEqual(filmMask, {
+      filmIsInsideSheet: true,
+      targetsAreInsideSheet: true,
+      burstsAreInsideSheet: true,
+      overflow: 'hidden',
+      transform: 'none',
+    }, 'The unrotated film field is the clipping parent for every visual layer.');
+    assert.ok(fieldPadding.horizontal >= 48 && fieldPadding.horizontal < 52, 'Desktop keeps a compact horizontal margin around the bubbles.');
+    assert.ok(fieldPadding.vertical >= 48 && fieldPadding.vertical < 52, 'Desktop keeps a compact vertical margin around the bubbles.');
     await screenshot(page, 'desktop-dark.png');
     return { fieldPadding, ...await inspectStaggeredLayout(page) };
   });

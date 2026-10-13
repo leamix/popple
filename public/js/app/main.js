@@ -125,7 +125,7 @@ function resize() {
   cancelAll();effects.clear();
   const geometry=createBubbleLayout(window.innerWidth,diameter);
   const fullViewport=matchMedia('(max-width: 540px)').matches;
-  const fieldPadding=fullViewport?0:40;
+  const fieldPadding=fullViewport?0:24;
   const width=fullViewport?window.innerWidth:geometry.width+fieldPadding*2;
   const height=fullViewport?window.innerHeight:geometry.height+fieldPadding*2;
   const offsetX=fullViewport?(width-geometry.width)/2:fieldPadding;
