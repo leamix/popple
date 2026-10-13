@@ -248,8 +248,10 @@ void main() {
   float c=clamp(u_collapse,0.,1.);
   float eps=.0032;
   float h=heightAt(p);
-  float dx=(heightAt(p+vec2(eps,0.))-heightAt(p-vec2(eps,0.)))/(2.*eps);
-  float dy=(heightAt(p+vec2(0.,eps))-heightAt(p-vec2(0.,eps)))/(2.*eps);
+  float hxPlus=heightAt(p+vec2(eps,0.)), hxMinus=heightAt(p-vec2(eps,0.));
+  float hyPlus=heightAt(p+vec2(0.,eps)), hyMinus=heightAt(p-vec2(0.,eps));
+  float dx=(hxPlus-hxMinus)/(2.*eps), dy=(hyPlus-hyMinus)/(2.*eps);
+  float curvature=(hxPlus+hxMinus+hyPlus+hyMinus-4.*h)/(eps*eps);
   vec3 normal=normalize(vec3(-dx,-dy,1.));
   vec3 reflected=reflect(vec3(0.,0.,-1.),normal);
   // Rotate the illumination frame, including every studio source. Surface
@@ -275,12 +277,12 @@ void main() {
   float softShoulder=exp(-sq((r-.90)/.105))*body;
   spec+=vec3(.64,.76,.83)*softShoulder*(.025+.26*litEdge)*mix(.30,1.,u_dark)*(1.-c*.4);
   vec2 exitDirection=-keyDirection();
-  float farSide=pow(max(0.,dot(direction,exitDirection)),6.);
-  float returnLight=exp(-sq((r-.82)/.14))*farSide;
-  float returnEdge=exp(-sq((r-mix(.945,.955,u_dark))/mix(.033,.043,u_dark)))*farSide;
+  float farSide=pow(max(0.,dot(direction,exitDirection)),mix(3.6,6.,u_dark));
+  float returnLight=exp(-sq((r-mix(.78,.82,u_dark))/mix(.19,.14,u_dark)))*farSide;
+  float returnEdge=exp(-sq((r-mix(.915,.955,u_dark))/mix(.070,.043,u_dark)))*farSide;
   // A directional return through the thin wall lights a wide patch inside
   // the opposite shoulder. This is an optical approximation, not ray tracing.
-  spec+=vec3(1.)*(returnLight*mix(.10,.16,u_dark)+returnEdge*mix(1.6,.37,u_dark))*body*(1.-c*.55);
+  spec+=vec3(1.)*(returnLight*mix(.50,.16,u_dark)+returnEdge*mix(.68,.37,u_dark))*body*(1.-c*.55);
   float shoulder=exp(-sq((r-.958)/.022))*body;
   float shoulderLight=pow(max(0.,dot(normalize(turn(vec2(-.7,.8),u_light_angle)),direction)),5.);
   spec+=vec3(.84,.94,1.)*shoulder*(.06+.30*shoulderLight)*(1.-c*.75)*mix(.22,1.,u_dark);
@@ -288,7 +290,7 @@ void main() {
   float grain=(noise(p*220.)-.5)*.006;
   spec+=grain*(body+rim)*.5;
   // Fold contrast retains the depressed shape after popping without glassy glare.
-  spec+=c*body*max(0.,(-dx+dy)*.09);
+  spec+=c*body*max(0.,(-dx+dy)*.09)*u_dark;
   spec=1.-exp(-max(vec3(0.),spec)*1.4);
   vec2 sourceUV=lightCoordinates(reflected);
   vec2 highlight=highlightMasks(sourceUV,c*mix(.11,.18,u_dark));
@@ -305,15 +307,16 @@ void main() {
   // stacked dark/white studio strips made the lower-right edge look moulded.
   float coat=body*mix(mix(.009,.015,u_dark),.020,c);
   float rimOcclusion=exp(-sq((r-1.006)/.011))*(.35+.65*sq(max(0.,-q.y)));
-  float foldShade=c*clamp((dx-dy)*mix(.14,.07,u_dark),0.,mix(.16,.09,u_dark));
+  // Darken local fold valleys, not every sloping face of the vented cap. A
+  // broad one-sided slope mask made half a clear pocket look cut away.
+  float valleyShade=smoothstep(3.,28.,max(0.,curvature))*.024+(1.-normal.z)*.018;
+  float foldShade=c*mix(valleyShade,clamp((dx-dy)*.07,0.,.09),u_dark);
   float shadowA=shadow*mix(.050,.11,u_dark)+body*foldShade;
   shadowA+=(1.-u_dark)*(rimOcclusion*.10+body*pow(1.-normal.z,3.)*.025+c*body*(1.-normal.z)*.035);
-  // On pale backing white alone has little contrast. A narrow shaded wall
-  // beside the return and a local shadow behind the caustic reveal its light.
-  // They follow the source and never wrap the pocket in another dark ring.
-  float returnShade=exp(-sq((r-.878)/.044))*farSide*body*(1.-c*.55);
-  float causticShade=exp(-sq((r-1.205)/.035))*farSide*(1.-c*.55);
-  shadowA+=(1.-u_dark)*(returnShade*.18+causticShade*.20);
+  // A shallow transition leaves the full contour and volume visible beneath
+  // the broad return. The background pool and its shadow are drawn separately.
+  float returnShade=exp(-sq((r-.70)/.15))*farSide*body*(1.-c*.55);
+  shadowA+=(1.-u_dark)*returnShade*.055;
   float alpha=clamp(specMax+(coat+shadowA)*(1.-specMax),0.,1.);
   float transmissionLight=mix(.79+shade*.25,.92+shade*.08,u_dark);
   vec3 premul=spec+bg*coat*(1.-specMax)*transmissionLight;
