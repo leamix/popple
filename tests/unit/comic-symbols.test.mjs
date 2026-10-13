@@ -23,7 +23,18 @@ test('a pop uses a varied group of distinct manga symbols', () => {
       'One pop should not repeat the same doodle.');
     rays.forEach(ray => seen.add(ray.kind));
   }
-  assert.ok(seen.size >= 16, `Expected at least 16 symbol designs, found ${seen.size}.`);
+  assert.equal(seen.size, COMIC_SYMBOLS.length, 'Repeated pops should use the complete approved catalogue.');
+});
+
+test('the rejected questions, sweat, moving puff and arrows are absent from bursts and logo choices', () => {
+  const rejected = new Set(['question-pair', 'sweat-drops', 'moving-puff', 'attention-arrows']);
+  assert.equal(COMIC_SYMBOLS.length, 16);
+  assert.equal(COMIC_SYMBOLS.some(symbol => rejected.has(symbol.id)), false);
+});
+
+test('all four approved legacy families are available alongside the remaining manga designs', () => {
+  const ids = new Set(COMIC_SYMBOLS.map(symbol => symbol.id));
+  for (const id of ['legacy-dart', 'legacy-lightning', 'legacy-strokes', 'legacy-star']) assert.ok(ids.has(id), `${id} must be available for both consumers.`);
 });
 
 test('reduced motion keeps the symbol variety without animated travel or rotation', () => {

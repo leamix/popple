@@ -1,5 +1,5 @@
 import { PopSequence, synthesizePop } from './sound.js';
-import { drawComicSymbol, sampleComicSymbols } from '../core/comic-symbols.js';
+import { COMIC_SYMBOLS, drawComicSymbol, sampleComicSymbols } from '../core/comic-symbols.js';
 
 // Short, dry plastic transients and perimeter-only comic accents.
 // Everything is generated locally: no audio download or external dependencies.
@@ -158,7 +158,8 @@ export class BurstLayer {
   burst(x, y, radius, { dark = true, reducedMotion = false } = {}) {
     if (!this.context) return;
     const random = randomFrom(++this.serial * 9817);
-    const count = reducedMotion ? 3 + Math.floor(random() * 3) : 7 + Math.floor(random() * 5);
+    const count = Math.min(COMIC_SYMBOLS.length,
+      reducedMotion ? 3 + Math.floor(random() * 3) : 7 + Math.floor(random() * 5));
     // Irregular gaps keep accents apart without creating the same radial stamp.
     const gaps = Array.from({ length: count }, () => 0.65 + random() * 0.8);
     const totalGap = gaps.reduce((sum, gap) => sum + gap, 0);
