@@ -6,6 +6,8 @@
     "start": "node scripts/server.mjs",
     "test": "node --test tests/unit/*.test.mjs",
     "test:browser": "node tests/browser/browser.test.mjs",
-    "test:browser:interaction": "node tests/browser/friction-browser.test.mjs"
+    "test:browser:interaction": "node tests/browser/friction-browser.test.mjs",
+    "test:browser:performance": "node tests/browser/performance.test.mjs",
+    "test:browser:shader": "node tests/browser/shader-equivalence.test.mjs"
   }
 }
