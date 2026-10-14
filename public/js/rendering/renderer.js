@@ -2,23 +2,75 @@
 // the same height field provides the finger dent and the collapsed creases.
 import { makeMembrane } from '../core/membrane.js';
 import { MAX_SHEET_SITES, SheetState } from '../core/sheet.js';
+import { BubbleBatch } from './bubble-batch.js';
 const vertex = `
 attribute vec2 a_position;
 varying vec2 v_uv;
 void main() { v_uv = a_position; gl_Position = vec4(a_position,0.,1.); }
 `;
+const batchVertex = `
+attribute vec2 a_position;
+attribute vec4 a_rect, a_state;
+attribute vec3 a_touchRadius;
+attribute vec2 a_link;
+attribute float a_record;
+uniform vec2 u_framebuffer;
+varying vec2 v_uv;
+varying vec4 v_state;
+varying vec3 v_touchRadius;
+varying vec2 v_link;
+varying float v_record;
+void main() {
+  v_uv=a_position;v_state=a_state;v_touchRadius=a_touchRadius;
+  v_link=a_link;v_record=a_record;
+  // Reproduce each original integer viewport inside one common framebuffer.
+  // This keeps subpixel placement identical, including fractional screen DPR.
+  vec2 pixel=a_rect.xy+(a_position*.5+.5)*a_rect.zw;
+  gl_Position=vec4(pixel/u_framebuffer*2.-1.,0.,1.);
+}
+`;
 const fragment = `
 precision highp float;
 varying vec2 v_uv;
-uniform float u_seed, u_compression, u_collapse, u_dark, u_time, u_bulge, u_light_angle;
-uniform vec2 u_touch, u_light, u_resolution, u_origin;
-uniform float u_radius;
-// A tile only sees local pockets; shader size never depends on sheet count.
-uniform vec4 u_sites[${MAX_SHEET_SITES}], u_links[${MAX_SHEET_SITES}];
-uniform int u_site_count;
+uniform float u_dark, u_time, u_light_angle;
+uniform vec2 u_light, u_resolution, u_origin;
+#ifdef BATCH_PASS
+varying vec4 v_state;
+varying vec3 v_touchRadius;
+varying vec2 v_link;
+varying float v_record;
+#define u_seed v_state.x
+#define u_compression v_state.y
+#define u_collapse v_state.z
+#define u_bulge v_state.w
+#define u_touch v_touchRadius.xy
+#define u_radius v_touchRadius.z
+#define u_link vec4(v_link,0.,0.)
+uniform highp sampler2D u_membranes;
+uniform float u_membrane_rows;
+vec4 u_folds[5], u_foldProfile[5], u_pockets[3], u_dent;
+float u_air;
+vec4 membraneTexel(float column) {
+  return texture2D(u_membranes,vec2((column+.5)/15.,v_record/u_membrane_rows));
+}
+void loadMembrane() {
+  u_air=membraneTexel(0.).x;u_dent=membraneTexel(1.);
+  for(int i=0;i<5;i++) {
+    u_folds[i]=membraneTexel(2.+float(i));
+    u_foldProfile[i]=membraneTexel(7.+float(i));
+  }
+  for(int i=0;i<3;i++) u_pockets[i]=membraneTexel(12.+float(i));
+}
+#else
+uniform float u_seed, u_compression, u_collapse, u_bulge, u_radius;
+uniform vec2 u_touch;
 uniform vec4 u_link;
 uniform vec4 u_folds[5], u_foldProfile[5], u_pockets[3], u_dent;
 uniform float u_air;
+#endif
+// A tile only sees local pockets; shader size never depends on sheet count.
+uniform vec4 u_sites[${MAX_SHEET_SITES}], u_links[${MAX_SHEET_SITES}];
+uniform int u_site_count;
 const float PI = 3.14159265359;
 float sq(float x) { return x*x; }
 float angleOf(vec2 v) { return dot(v,v)<.00000001?0.:atan(v.y,v.x); }
@@ -305,6 +357,11 @@ void main() {
   // Beyond the clear cap all height-dependent terms have a zero body mask.
   // Its thin rim/shadow still render, without five invisible height samples.
   if(r<1.012) {
+#ifdef BATCH_PASS
+    // Permanent folds are fetched once and reused by all five slope samples.
+    // Intact pockets never fetch the texture.
+    if(c>.001) loadMembrane();
+#endif
     h=heightAt(p);
     float hxPlus=heightAt(p+vec2(eps,0.)), hxMinus=heightAt(p-vec2(eps,0.));
     float hyPlus=heightAt(p+vec2(0.,eps)), hyMinus=heightAt(p-vec2(0.,eps));
@@ -401,36 +458,43 @@ export class FilmRenderer {
       if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
       return shader;
     };
-    const vs=compile(gl.VERTEX_SHADER,vertex);
-    const makeProgram=source=>{
+    const makeProgram=(source,vertexSource=vertex)=>{
+      const vs=compile(gl.VERTEX_SHADER,vertexSource);
       const fs=compile(gl.FRAGMENT_SHADER,source),program=gl.createProgram();
       gl.attachShader(program,vs);gl.attachShader(program,fs);
-      gl.bindAttribLocation(program,0,'a_position');gl.linkProgram(program);gl.deleteShader(fs);
+      for(const [index,name] of ['a_position','a_rect','a_state','a_touchRadius','a_link','a_record'].entries()) gl.bindAttribLocation(program,index,name);
+      gl.linkProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
       if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
       return program;
     };
     // Distinct entry points let the linker discard cap folds from the sheet
     // program and site lists from caps. Each stays within 64 uniform vectors.
-    this.program=makeProgram(fragment);
+    this.legacyProgram=makeProgram(fragment);
     this.sheetProgram=makeProgram('#define SHEET_PASS\n'+fragment);
-    gl.deleteShader(vs);
+    this.batch=new BubbleBatch(gl);
+    this.batchProgram=this.batch.available?makeProgram('#define BATCH_PASS\n'+fragment,batchVertex):null;
+    this.batchingEnabled=true;
+    this.program=this.batchProgram||this.legacyProgram;
     gl.useProgram(this.program);
-    const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
+    this.quadBuffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);
     gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
     const a=gl.getAttribLocation(this.program,'a_position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
     const uniforms=program=>{
       const locations={};
-      for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','resolution','origin','radius','site_count','link']) locations[name]=gl.getUniformLocation(program,'u_'+name);
+      for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','resolution','origin','radius','site_count','link','framebuffer','membranes','membrane_rows']) locations[name]=gl.getUniformLocation(program,'u_'+name);
       for(const name of ['folds','foldProfile','pockets','sites','links']) locations[name]=gl.getUniformLocation(program,'u_'+name+'[0]');
       return locations;
     };
-    this.uniforms=uniforms(this.program);
+    this.legacyUniforms=uniforms(this.legacyProgram);
+    this.batchUniforms=this.batchProgram?uniforms(this.batchProgram):null;
+    this.uniforms=this.batchUniforms||this.legacyUniforms;
     this.sheetUniforms=uniforms(this.sheetProgram);
     this.sites=new Float32Array(MAX_SHEET_SITES*4);
     this.links=new Float32Array(MAX_SHEET_SITES*4);
     this.sheetState=new SheetState();
     this.layout=null;
     this.membranes=[];
+    this.getMembrane=(bubble,index)=>this.membraneFor(bubble,index);
     gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0,0,0,0);
   }
@@ -438,8 +502,20 @@ export class FilmRenderer {
     this.width=width;this.height=height;this.dpr=dpr;
     this.layout=null;
     this.canvas.width=Math.round(width*dpr);this.canvas.height=Math.round(height*dpr);
+    this.geometry={width,height,dpr,framebufferWidth:this.canvas.width,framebufferHeight:this.canvas.height};
+  }
+  membraneFor(bubble,index) {
+    let membrane=this.membranes[index];
+    const popX=bubble.popX,popY=-bubble.popY;
+    if(!membrane||membrane.seed!==bubble.seed||membrane.popX!==popX||membrane.popY!==popY) {
+      membrane=this.membranes[index]=makeMembrane(bubble.seed,popX,popY);
+    }
+    return membrane;
   }
   render(bubbles,layout,dark,time,light) {
+    const batched=this.batchingEnabled&&this.batchProgram;
+    this.program=batched?this.batchProgram:this.legacyProgram;
+    this.uniforms=batched?this.batchUniforms:this.legacyUniforms;
     const gl=this.gl,s=this.sheetUniforms,u=this.uniforms;
     if(this.layout!==layout) {
       this.layout=layout;
@@ -447,6 +523,8 @@ export class FilmRenderer {
     }
     this.sheetState.update(bubbles,this.reducedMotion);
     const deformation=this.sheetState.deformation;
+    gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);
+    gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
     gl.disable(gl.SCISSOR_TEST);
     gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.sheetProgram);
     gl.uniform1f(s.dark,dark?1:0);
@@ -484,6 +562,12 @@ export class FilmRenderer {
     gl.uniform1f(u.dark,dark?1:0);gl.uniform1f(u.time,time);
     gl.uniform2f(u.light,light.x,light.y);
     gl.uniform1f(u.light_angle,Number.isFinite(light.angle)?light.angle:0);
+    if(batched) {
+      gl.viewport(0,0,this.canvas.width,this.canvas.height);
+      gl.uniform2f(u.framebuffer,this.canvas.width,this.canvas.height);
+      this.batch.draw(bubbles,layout,deformation,this.geometry,this.getMembrane,u);
+      return;
+    }
     for(let i=0;i<bubbles.length;i++) {
       const b=bubbles[i], pos=layout[i], extent=pos.radius*1.38;
       if(pos.x+extent<0||pos.y+extent<0||pos.x-extent>this.width||pos.y-extent>this.height) continue;
@@ -495,11 +579,7 @@ export class FilmRenderer {
       // Intact caps never sample collapsed folds; avoid building/uploading
       // their permanent wrinkle data until the first rupture.
       if(b.popped) {
-        let membrane=this.membranes[i];
-        const popX=b.popX,popY=-b.popY;
-        if(!membrane||membrane.seed!==b.seed||membrane.popX!==popX||membrane.popY!==popY) {
-          membrane=this.membranes[i]=makeMembrane(b.seed,popX,popY);
-        }
+        const membrane=this.membraneFor(b,i);
         gl.uniform1f(u.air,membrane.air);gl.uniform4fv(u.dent,membrane.dent);
         gl.uniform4fv(u.folds,membrane.folds);gl.uniform4fv(u.foldProfile,membrane.profiles);gl.uniform4fv(u.pockets,membrane.pockets);
       }
