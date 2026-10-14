@@ -115,10 +115,11 @@ test('100, 500 and 1000 caps keep original order and use bounded chunks with one
       ['TRIANGLES', 0, 6, Math.min(256, count - index * 256)]));
     const uploads = selectedCalls(gl, 'bufferSubData');
     assert.deepEqual(uploads.flatMap(call => call.data.filter((_, index) => index % BATCH_STRIDE === 4)), states.map(state => state.seed));
-    for (const upload of uploads) {
+    for (let chunk = 0; chunk < uploads.length; chunk++) {
+      const upload = uploads[chunk], rowStart = chunk * 256;
       assert.ok(upload.data.length <= 256 * BATCH_STRIDE);
-      assert.equal(upload.data[13], .5, 'texture rows restart within each chunk');
-      assert.equal(upload.data.at(-1), upload.data.length / BATCH_STRIDE - .5);
+      assert.equal(upload.data[13], rowStart + .5, 'vertex chunks keep distinct rows in the shared texture page');
+      assert.equal(upload.data.at(-1), rowStart + upload.data.length / BATCH_STRIDE - .5);
     }
     assert.equal(selectedCalls(gl, 'texSubImage2D').length, 0, 'intact caps never sample or upload the wrinkle texture');
   }
@@ -176,28 +177,82 @@ test('cached arrays and upload views survive frames; fold data is repacked only 
   assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[60], .25);
 });
 
-test('multiple popped chunks upload their own wrinkle rows before every draw and intact chunks preserve the current texture cache', () => {
-  const gl = mockGL(), batch = new BubbleBatch(gl), count = 500;
-  const states = Array.from({ length: count }, (_, index) => ({ ...bubble(index), popped: true, collapse: 1 }));
-  const layout = lattice(count), shapes = states.map((_, index) => membrane(index / 1024));
-  const getMembrane = (_, index) => shapes[index];
-  for (let frame = 0; frame < 2; frame++) render(batch, states, layout, geometry(), undefined, getMembrane);
-  const uploads = selectedCalls(gl, 'texSubImage2D');
-  assert.deepEqual(uploads.map(call => call.args[5]), [256, 244, 256, 244]);
-  assert.deepEqual(uploads.map(call => call.data[0]), [0, .25, 0, .25]);
-  assert.deepEqual(uploads[1].data.filter((_, index) => index % 60 === 0),
-    Array.from({ length: 244 }, (_, index) => (index + 256) / 1024));
-  assert.equal(uploads[0].args.at(-1), uploads[2].args.at(-1), 'each chunk reuses its own CPU upload view');
-  assert.equal(uploads[1].args.at(-1), uploads[3].args.at(-1));
-  for (let index = 256; index < count; index++) { states[index].popped = false; states[index].collapse = 0; }
-  render(batch, states, layout, geometry(), undefined, getMembrane);
-  assert.equal(selectedCalls(gl, 'texSubImage2D').length, 5, 'the first chunk replaces the last frame\'s second chunk');
-  render(batch, states, layout, geometry(), undefined, getMembrane);
-  assert.equal(selectedCalls(gl, 'texSubImage2D').length, 5, 'an intact second chunk leaves the first chunk texture available next frame');
-  shapes[0] = membrane(.875);
-  render(batch, states, layout, geometry(), undefined, getMembrane);
-  assert.equal(selectedCalls(gl, 'texSubImage2D').length, 6);
-  assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[0], .875);
+test('500 and 1000 popped caps use distinct page rows across bounded vertex chunks and retain all permanent data on the GPU', () => {
+  for (const count of [500, 1000]) {
+    const gl = mockGL(), batch = new BubbleBatch(gl);
+    const states = Array.from({ length: count }, (_, index) => ({ ...bubble(index), popped: true, collapse: 1 }));
+    const layout = lattice(count), shapes = states.map((_, index) => membrane(index / 1024));
+    const getMembrane = (_, index) => shapes[index];
+    for (let frame = 0; frame < 2; frame++) render(batch, states, layout, geometry(), undefined, getMembrane);
+    const uploads = selectedCalls(gl, 'texSubImage2D');
+    assert.equal(batch.capacity, 256);
+    assert.equal(batch.textureCapacity, count === 500 ? 512 : 1024);
+    assert.deepEqual(uploads.map(call => call.args[5]), [count], 'only the first frame uploads a stable permanent texture page');
+    assert.deepEqual(uploads[0].data.filter((_, index) => index % 60 === 0),
+      Array.from({ length: count }, (_, index) => index / 1024));
+    const rows = selectedCalls(gl, 'bufferSubData').slice(0, Math.ceil(count / 256))
+      .flatMap(call => call.data.filter((_, index) => index % 14 === 13));
+    assert.deepEqual(rows, Array.from({ length: count }, (_, index) => index + .5), 'later vertex chunks cannot overwrite earlier cap wrinkle rows');
+    const data = batch.membraneData, page = batch.pages[0], view = page.membranes;
+    shapes[count - 1] = membrane(.875);
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').length, 2);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[(count - 1) * 60], .875);
+    assert.equal(batch.membraneData, data); assert.equal(batch.pages[0], page);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).args.at(-1), view);
+    for (const state of states) { state.popped = false; state.collapse = 0; }
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').length, 2, 'an entirely intact page clears its CPU cache without uploading');
+    states[count - 1].popped = true; states[count - 1].collapse = 1;
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').length, 3);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[(count - 1) * 60], .875);
+    assert.ok(selectedCalls(gl, 'texSubImage2D').at(-1).data.slice(0, (count - 1) * 60).every(value => value === 0));
+  }
+});
+
+test('small texture devices page membrane rows while retaining source order and correct per-page addressing', () => {
+  for (const maxTexture of [128, 512]) {
+    const gl = mockGL({ maxTexture }), batch = new BubbleBatch(gl), count = 1000;
+    const states = Array.from({ length: count }, (_, index) => ({ ...bubble(index), popped: true, collapse: 1 }));
+    const layout = lattice(count), shapes = states.map((_, index) => membrane(index / 1024));
+    const getMembrane = (_, index) => shapes[index];
+    for (let frame = 0; frame < 2; frame++) render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(batch.textureCapacity, maxTexture);
+    const pageCount = Math.ceil(count / maxTexture), uploads = selectedCalls(gl, 'texSubImage2D');
+    assert.equal(uploads.length, pageCount * 2, 'one shared texture uploads each different page before its caps draw');
+    for (let page = 0; page < pageCount; page++) {
+      const start = page * maxTexture, rows = Math.min(maxTexture, count - start);
+      assert.equal(uploads[page].args[5], rows);
+      assert.deepEqual(uploads[page].data.filter((_, index) => index % 60 === 0),
+        Array.from({ length: rows }, (_, index) => (index + start) / 1024));
+      assert.equal(uploads[page].args.at(-1), uploads[page + pageCount].args.at(-1));
+    }
+    const frameDraws = selectedCalls(gl, 'drawArraysInstancedANGLE').length / 2;
+    const records = selectedCalls(gl, 'bufferSubData').slice(0, frameDraws);
+    assert.deepEqual(records.flatMap(call => call.data.filter((_, index) => index % 14 === 4)), states.map(state => state.seed));
+    assert.deepEqual(records.flatMap(call => call.data.filter((_, index) => index % 14 === 13)),
+      Array.from({ length: count }, (_, index) => index % maxTexture + .5));
+    for (let index = maxTexture; index < count; index++) { states[index].popped = false; states[index].collapse = 0; }
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    const previousUploads = selectedCalls(gl, 'texSubImage2D').length;
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').length, previousUploads, 'intact pages preserve the resident popped page for the next frame');
+  }
+});
+
+test('texture growth is independent of the bounded vertex buffer and cached after larger layouts', () => {
+  const gl = mockGL(), batch = new BubbleBatch(gl);
+  let records;
+  for (const count of [100, 500, 1000, 2]) {
+    render(batch, Array.from({ length: count }, (_, index) => bubble(index)), lattice(count));
+    if (count === 500) records = batch.records;
+    if (count >= 500 || count === 2) assert.equal(batch.records, records);
+  }
+  assert.equal(batch.records.length, 256 * BATCH_STRIDE);
+  assert.equal(batch.textureCapacity, 1024);
+  assert.deepEqual(selectedCalls(gl, 'texImage2D').map(call => call.args[4]), [128, 512, 1024]);
+  assert.deepEqual(selectedCalls(gl, 'uniform1f').at(-1).args, ['rows', 1024]);
 });
 
 test('empty and completely culled layouts skip uploads and draws, while first venting uploads cached folds at the shader threshold', () => {

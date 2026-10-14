@@ -1,5 +1,6 @@
-// Per-cap data stays in a small bounded batch. The permanent wrinkle texture
-// is sampled only by vented caps and does not require float colour buffers.
+// Changing cap state stays in small bounded vertex batches. Permanent wrinkle
+// rows share a larger cached texture page, sampled only by vented caps. Float
+// colour buffers are not required.
 export const BATCH_STRIDE = 14;
 export const MEMBRANE_TEXELS = 15;
 const MEMBRANE_STRIDE = MEMBRANE_TEXELS * 4;
@@ -67,7 +68,9 @@ export class BubbleBatch {
       && maximumTexture >= MEMBRANE_TEXELS;
     this.mode = this.angle ? 'instanced' : 'expanded';
     this.maximumCapacity = Math.min(256, maximumTexture);
+    this.maximumTextureRows = maximumTexture;
     this.capacity = 0;
+    this.textureCapacity = 0;
     this.layout = null;
     this.indices = new Uint32Array(0);
     this.rects = new Float32Array(0);
@@ -76,7 +79,8 @@ export class BubbleBatch {
     this.membraneData = new Float32Array(0);
     this.membranes = [];
     this.chunks = [];
-    this.uploadedChunk = null;
+    this.pages = [];
+    this.uploadedPage = null;
     this.uploadedVersion = -1;
     if (!this.available) return;
     this.quadBuffer = gl.createBuffer();
@@ -106,10 +110,19 @@ export class BubbleBatch {
     gl.bufferData(gl.ARRAY_BUFFER, this.records.byteLength, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.expandedBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.expandedRecords.byteLength, gl.DYNAMIC_DRAW);
+  }
+
+  growTexture(count) {
+    const required = Math.min(count, this.maximumTextureRows);
+    if (required <= this.textureCapacity) return;
+    let capacity = Math.max(1, this.textureCapacity);
+    while (capacity < required) capacity *= 2;
+    this.textureCapacity = Math.min(capacity, this.maximumTextureRows);
+    const gl = this.gl;
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MEMBRANE_TEXELS, this.capacity, 0, gl.RGBA, gl.FLOAT, null);
-    this.uploadedChunk = null;
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MEMBRANE_TEXELS, this.textureCapacity, 0, gl.RGBA, gl.FLOAT, null);
+    this.uploadedPage = null;
   }
 
   cacheLayout(layout, geometry) {
@@ -137,16 +150,27 @@ export class BubbleBatch {
       visible++;
     }
     this.grow(count);
+    this.growTexture(count);
     this.chunks = [];
-    for (let start = 0; start < count; start += this.capacity) {
-      const chunkCount = Math.min(this.capacity, count - start);
+    this.pages = [];
+    this.uploadedPage = null;
+    for (let start = 0; start < count; start += this.textureCapacity) {
+      const pageCount = Math.min(this.textureCapacity, count - start);
       // Cache views on resize; WebGL 1 has no source-offset upload overload.
-      this.chunks.push({
-        start, count: chunkCount, version: 0,
-        records: this.records.subarray(0, chunkCount * BATCH_STRIDE),
-        expanded: this.expandedRecords.subarray(0, chunkCount * 6 * EXPANDED_STRIDE),
-        membranes: this.membraneData.subarray(start * MEMBRANE_STRIDE, (start + chunkCount) * MEMBRANE_STRIDE),
-      });
+      const page = {
+        start, count: pageCount, version: 0, chunks: [],
+        membranes: this.membraneData.subarray(start * MEMBRANE_STRIDE, (start + pageCount) * MEMBRANE_STRIDE),
+      };
+      this.pages.push(page);
+      for (let rowStart = 0; rowStart < pageCount; rowStart += this.capacity) {
+        const chunkCount = Math.min(this.capacity, pageCount - rowStart);
+        const chunk = {
+          start: start + rowStart, count: chunkCount, page, rowStart,
+          records: this.records.subarray(0, chunkCount * BATCH_STRIDE),
+          expanded: this.expandedRecords.subarray(0, chunkCount * 6 * EXPANDED_STRIDE),
+        };
+        this.chunks.push(chunk); page.chunks.push(chunk);
+      }
     }
   }
 
@@ -186,43 +210,51 @@ export class BubbleBatch {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.uniform1i(uniforms.membranes, 0);
-    gl.uniform1f(uniforms.membrane_rows, this.capacity);
+    gl.uniform1f(uniforms.membrane_rows, this.textureCapacity);
     this.bindAttributes(expanded);
     try {
-      for (const chunk of this.chunks) {
+      for (const page of this.pages) {
         let needsMembranes = false;
-        for (let row = 0; row < chunk.count; row++) {
-          const visible = chunk.start + row, index = this.indices[visible];
-          const bubble = bubbles[index], position = layout[index], recordOffset = row * BATCH_STRIDE;
-          packBubbleRecord(this.records, recordOffset, bubble, position, this.rects, visible * 4, deformation, index, row);
+        // Finish permanent rows for the whole page before any of its vertex
+        // batches draw. A stable page can then remain on the GPU across frames.
+        for (let row = 0; row < page.count; row++) {
+          const visible = page.start + row, index = this.indices[visible], bubble = bubbles[index];
           const membrane = bubble.popped || bubble.collapse > .001 ? getMembrane(bubble, index) : null;
           if (membrane !== this.membranes[visible]) {
             packMembraneRow(this.membraneData, visible * MEMBRANE_STRIDE, membrane);
             this.membranes[visible] = membrane;
-            chunk.version++;
+            page.version++;
           }
           // Match heightAt's branch. A popped cap before venting progresses
           // caches its eventual folds without making the GPU upload them yet.
           if (bubble.collapse > .001) needsMembranes = true;
-          if (expanded) {
-            for (let vertex = 0; vertex < 6; vertex++) {
-              const offset = (row * 6 + vertex) * EXPANDED_STRIDE;
-              this.expandedRecords[offset] = QUAD[vertex * 2];
-              this.expandedRecords[offset + 1] = QUAD[vertex * 2 + 1];
-              for (let field = 0; field < BATCH_STRIDE; field++) {
-                this.expandedRecords[offset + 2 + field] = this.records[recordOffset + field];
+        }
+        if (needsMembranes && (this.uploadedPage !== page || this.uploadedVersion !== page.version)) {
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MEMBRANE_TEXELS, page.count, gl.RGBA, gl.FLOAT, page.membranes);
+          this.uploadedPage = page; this.uploadedVersion = page.version;
+        }
+        for (const chunk of page.chunks) {
+          for (let row = 0; row < chunk.count; row++) {
+            const visible = chunk.start + row, index = this.indices[visible];
+            const bubble = bubbles[index], position = layout[index], recordOffset = row * BATCH_STRIDE;
+            packBubbleRecord(this.records, recordOffset, bubble, position, this.rects, visible * 4,
+              deformation, index, chunk.rowStart + row);
+            if (expanded) {
+              for (let vertex = 0; vertex < 6; vertex++) {
+                const offset = (row * 6 + vertex) * EXPANDED_STRIDE;
+                this.expandedRecords[offset] = QUAD[vertex * 2];
+                this.expandedRecords[offset + 1] = QUAD[vertex * 2 + 1];
+                for (let field = 0; field < BATCH_STRIDE; field++) {
+                  this.expandedRecords[offset + 2 + field] = this.records[recordOffset + field];
+                }
               }
             }
           }
+          gl.bindBuffer(gl.ARRAY_BUFFER, expanded ? this.expandedBuffer : this.recordBuffer);
+          gl.bufferSubData(gl.ARRAY_BUFFER, 0, expanded ? chunk.expanded : chunk.records);
+          if (expanded) gl.drawArrays(gl.TRIANGLES, 0, chunk.count * 6);
+          else this.angle.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 6, chunk.count);
         }
-        gl.bindBuffer(gl.ARRAY_BUFFER, expanded ? this.expandedBuffer : this.recordBuffer);
-        gl.bufferSubData(gl.ARRAY_BUFFER, 0, expanded ? chunk.expanded : chunk.records);
-        if (needsMembranes && (this.uploadedChunk !== chunk || this.uploadedVersion !== chunk.version)) {
-          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MEMBRANE_TEXELS, chunk.count, gl.RGBA, gl.FLOAT, chunk.membranes);
-          this.uploadedChunk = chunk; this.uploadedVersion = chunk.version;
-        }
-        if (expanded) gl.drawArrays(gl.TRIANGLES, 0, chunk.count * 6);
-        else this.angle.drawArraysInstancedANGLE(gl.TRIANGLES, 0, 6, chunk.count);
       }
     } finally {
       // The sheet and legacy cap programs share this context and location 0.
