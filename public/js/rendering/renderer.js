@@ -45,26 +45,31 @@ float heightAt(vec2 p) {
   vec2 q=shape(p);
   float r=length(q), a=angleOf(q), c=clamp(u_collapse,0.,1.);
   float edge=1.-smoothstep(.88,1.015,r);
-  float dome=(.48+u_seed*.09)*pow(max(0.,1.-r*r),.58+u_seed*.07);
-  // An intact pocket stays taut. Gentle molding variation changes its broad
-  // highlight, while visible hinges belong exclusively to the vented skin.
-  vec2 stretch=turn(q,u_seed*5.7);
-  float slackLine=stretch.y-(u_seed-.5)*.45-(.10+u_seed*.26)*stretch.x*stretch.x;
-  float slack=exp(-sq(slackLine/(.14+u_seed*.09)));
-  float slackFade=smoothstep(.12,.38,r)*(1.-smoothstep(.75,.99,r));
-  dome+=(slack-.38*exp(-sq((slackLine+.14)/.27)))*(.006+u_seed*.006)*slackFade;
-  dome+=(.005*sin(q.x*5.3+u_seed*15.)*sin(q.y*4.4-u_seed*9.)+.007*dot(q,turn(vec2(1.,0.),u_seed*8.)))*edge;
-  float dist=length(q-u_touch*.67);
-  float dent=exp(-dist*dist/ (.17+.09*u_compression));
-  float opposite=exp(-dot(q+u_touch*.55,q+u_touch*.55)/.28);
-  dome += u_compression*(-.53*dent+.07*opposite)*edge;
-  dome += u_bulge*.22*opposite*edge;
-  // Neighbour tension tilts a small patch of the cap without depressing it
-  // like a second finger or changing the original pocket's hold state.
-  dome += dot(q,u_link.xy*vec2(1.,-1.))*.11*edge;
-  // Fine, taut stretch marks are confined to the heat-sealed shoulder.
-  dome += .003*sin(a*31.+3.*sin(a*7.+u_seed)+r*15.+u_seed)*smoothstep(.88,.97,r)*edge;
-  dome += .0005*sin(q.x*24.+q.y*11.+u_seed)*sin(q.y*19.-q.x*5.)*edge;
+  float dome=0.;
+  // Once venting is complete the dome contribution is exactly zero. Avoid
+  // evaluating its trigonometry/exponentials five times for every slack pixel.
+  if(c<1.) {
+    dome=(.48+u_seed*.09)*pow(max(0.,1.-r*r),.58+u_seed*.07);
+    // An intact pocket stays taut. Gentle molding variation changes its broad
+    // highlight, while visible hinges belong exclusively to the vented skin.
+    vec2 stretch=turn(q,u_seed*5.7);
+    float slackLine=stretch.y-(u_seed-.5)*.45-(.10+u_seed*.26)*stretch.x*stretch.x;
+    float slack=exp(-sq(slackLine/(.14+u_seed*.09)));
+    float slackFade=smoothstep(.12,.38,r)*(1.-smoothstep(.75,.99,r));
+    dome+=(slack-.38*exp(-sq((slackLine+.14)/.27)))*(.006+u_seed*.006)*slackFade;
+    dome+=(.005*sin(q.x*5.3+u_seed*15.)*sin(q.y*4.4-u_seed*9.)+.007*dot(q,turn(vec2(1.,0.),u_seed*8.)))*edge;
+    float dist=length(q-u_touch*.67);
+    float dent=exp(-dist*dist/ (.17+.09*u_compression));
+    float opposite=exp(-dot(q+u_touch*.55,q+u_touch*.55)/.28);
+    dome += u_compression*(-.53*dent+.07*opposite)*edge;
+    dome += u_bulge*.22*opposite*edge;
+    // Neighbour tension tilts a small patch of the cap without depressing it
+    // like a second finger or changing the original pocket's hold state.
+    dome += dot(q,u_link.xy*vec2(1.,-1.))*.11*edge;
+    // Fine, taut stretch marks are confined to the heat-sealed shoulder.
+    dome += .003*sin(a*31.+3.*sin(a*7.+u_seed)+r*15.+u_seed)*smoothstep(.88,.97,r)*edge;
+    dome += .0005*sin(q.x*24.+q.y*11.+u_seed)*sin(q.y*19.-q.x*5.)*edge;
+  }
   float collapsedHeight=0.;
   if(c>.001) {
     // Venting removes pressure support, not the film's molded volume. The
@@ -296,11 +301,16 @@ void main() {
   if(r>1.30) discard;
   float c=clamp(u_collapse,0.,1.);
   float eps=.0032;
-  float h=heightAt(p);
-  float hxPlus=heightAt(p+vec2(eps,0.)), hxMinus=heightAt(p-vec2(eps,0.));
-  float hyPlus=heightAt(p+vec2(0.,eps)), hyMinus=heightAt(p-vec2(0.,eps));
-  float dx=(hxPlus-hxMinus)/(2.*eps), dy=(hyPlus-hyMinus)/(2.*eps);
-  float curvature=(hxPlus+hxMinus+hyPlus+hyMinus-4.*h)/(eps*eps);
+  float h=0.,dx=0.,dy=0.,curvature=0.;
+  // Beyond the clear cap all height-dependent terms have a zero body mask.
+  // Its thin rim/shadow still render, without five invisible height samples.
+  if(r<1.012) {
+    h=heightAt(p);
+    float hxPlus=heightAt(p+vec2(eps,0.)), hxMinus=heightAt(p-vec2(eps,0.));
+    float hyPlus=heightAt(p+vec2(0.,eps)), hyMinus=heightAt(p-vec2(0.,eps));
+    dx=(hxPlus-hxMinus)/(2.*eps);dy=(hyPlus-hyMinus)/(2.*eps);
+    curvature=(hxPlus+hxMinus+hyPlus+hyMinus-4.*h)/(eps*eps);
+  }
   vec3 normal=normalize(vec3(-dx,-dy,1.));
   vec3 reflected=reflect(vec3(0.,0.,-1.),normal);
   // Rotate the illumination frame, including every studio source. Surface
