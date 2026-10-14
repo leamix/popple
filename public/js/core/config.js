@@ -58,15 +58,15 @@ export const LAYOUT_CONFIG = freeze({
 
 export const SHEET_CONFIG = freeze({
   maximumShaderSites: 24,
-  supportRadius: 3.05,
+  supportRadius: 3.065,
   neighbourRadius: 2.7,
-  maximumOffset: 0.035,
+  maximumOffset: 0.05,
   tileRadiusFactor: 4,
   popPulseSeconds: 0.28,
-  strain: freeze({ compression: 0.7, bulge: 0.8 }),
-  pull: freeze({ compression: 0.024, bulge: 0.02, pulse: 0.007 }),
-  coupling: freeze({ distanceGain: 4, strain: 0.15, pulseTension: 0.04 }),
-  pulse: freeze({ frequency: 32, decay: 16, self: 0.08, neighbour: 0.035, maximum: 0.14 }),
+  strain: freeze({ compression: 0.8, bulge: 0.95 }),
+  pull: freeze({ compression: 0.042, bulge: 0.035, pulse: 0.0115 }),
+  coupling: freeze({ distanceGain: 4, strain: 0.23, pulseTension: 0.06 }),
+  pulse: freeze({ frequency: 32, decay: 16, self: 0.11, neighbour: 0.055, maximum: 0.18 }),
 });
 
 export const PHYSICS_CONFIG = freeze({

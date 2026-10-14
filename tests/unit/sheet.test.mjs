@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { SheetState, MAX_SHEET_SITES } from '../../public/js/core/sheet.js';
 import { BubbleState } from '../../public/js/core/physics.js';
 import { createBubbleLayout } from '../../public/js/core/layout.js';
+import { SHEET_CONFIG } from '../../public/js/core/config.js';
 
 const pocket = (x, y, radius = 10) => ({ x, y, radius });
 const states = count => Array.from({ length: count }, (_, index) => new BubbleState(index));
@@ -41,6 +42,25 @@ test('released air pocket keeps a small sheet response until its spring settles'
   advance(bubbles[0], 2);
   sheet.update(bubbles);
   assert.ok(tension(sheet, 1) < pressedTension * 0.01);
+});
+
+test('one firm press gives visible local weld travel without activating neighbours', () => {
+  const geometry=createBubbleLayout(390);
+  const sheet=new SheetState();
+  sheet.resize(geometry.layout,geometry.width,geometry.height);
+  const bubbles=states(geometry.layout.length);
+  bubbles[4].press(0.4,-0.2);
+  bubbles[4].compression=0.7;bubbles[4].bulge=0.3;
+  sheet.update(bubbles);
+  for(const index of sheet.neighbours[4]) {
+    const offset=index*4;
+    assert.ok(Math.hypot(sheet.deformation[offset],sheet.deformation[offset+1])>0.0175,
+      'a firm press should move each adjacent weld by more than 1.75% of its radius');
+    assert.ok(tension(sheet,index)>0.075,'the adjacent shoulder should visibly relight');
+    assert.equal(bubbles[index].active,false);assert.equal(bubbles[index].compression,0);
+  }
+  assert.ok(SHEET_CONFIG.supportRadius>=3+SHEET_CONFIG.maximumOffset,
+    'render tile supports must include the largest possible weld travel');
 });
 
 test('a pop creates one damped local pulse and reduced motion suppresses it', () => {
@@ -101,7 +121,7 @@ test('multiple contacts stay subtle, reuse cached arrays, and never change pocke
   assert.equal(sheet.neighbours, neighbours);
   assert.deepEqual(bubbles.map(bubble => ({ ...bubble })), before);
   for (let index = 0; index < bubbles.length; index += 1) {
-    assert.ok(Math.hypot(deformation[index * 4], deformation[index * 4 + 1]) <= 0.035001);
+    assert.ok(Math.hypot(deformation[index * 4], deformation[index * 4 + 1]) <= 0.050001);
     assert.ok(tension(sheet, index) >= 0 && tension(sheet, index) <= 1);
     assert.ok(neighbours[index].length <= 6);
   }
@@ -123,7 +143,7 @@ const lattice = count => {
 const intersects = (site, tile) => {
   const nearestX = Math.max(tile.x, Math.min(site.x, tile.x + tile.width));
   const nearestY = Math.max(tile.y, Math.min(site.y, tile.y + tile.height));
-  return Math.hypot(site.x - nearestX, site.y - nearestY) <= site.radius * 3.05;
+  return Math.hypot(site.x - nearestX, site.y - nearestY) <= site.radius * SHEET_CONFIG.supportRadius;
 };
 
 test('render tiles cover the clipped viewport exactly and retain every intersecting support disc', () => {
