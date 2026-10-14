@@ -104,7 +104,7 @@ float heightAt(vec2 p) {
   }
   float h=mix(dome,collapsedHeight,c);
   // A low welded seam stays intact after the air has escaped.
-  h+=.009*exp(-sq((r-1.025)/.024))*(1.-c*.3);
+  h+=(.0065+u_seed*.002)*exp(-sq((r-1.025)/(.017+u_seed*.006)))*(1.-c*.3);
   return h;
 }
 float box(vec2 p, vec2 halfSize, float softness) {
@@ -202,6 +202,15 @@ vec2 transmittedPool(vec2 q, vec2 exitDirection, float collapse, float identity)
   float shade=exp(-sq((along-.98)/.30)-sq((across+.56)/.50))*mix(.12,.07,u_dark);
   return vec2(light,shade)*(1.-collapse*.55);
 }
+vec2 bridgeCrease(vec2 p, vec2 axis, float offset, float bend) {
+  // Two very shallow curved pinches in the common backing. Their derivative
+  // bends the existing reflection instead of painting opaque lines on plastic.
+  vec2 across=vec2(-axis.y,axis.x);
+  float along=dot(p,axis),line=dot(p,across)-offset-bend*along*along;
+  float taper=exp(-sq(sq(along/1.7)));
+  float gradient=-2.*line/(.032*.032)*exp(-sq(line/.032))*.0012*taper;
+  return (across-axis*(2.*bend*along))*gradient;
+}
 void drawSheet() {
   vec2 pixel=(v_uv*vec2(.5,-.5)+.5)*u_resolution;
   // Coordinates follow the pocket scale rather than the viewport aspect ratio.
@@ -214,6 +223,8 @@ void drawSheet() {
   slope+=k3*.021*cos(dot(p,k3)+1.8);
   vec2 k4=vec2(7.1,9.7);
   slope+=k4*.006*cos(dot(p,k4)+.65*sin(dot(p,k2)));
+  slope+=bridgeCrease(p,vec2(.8,.6),.42,.14);
+  slope+=bridgeCrease(p,vec2(-.6,.8),-.68,-.11);
   float exposed=1.,contact=0.,castShadow=0.,bounce=0.,nearFilm=0.,pool=0.,poolShade=0.;
   vec2 exitDirection=-keyDirection();
   for(int i=0;i<${MAX_SHEET_SITES};i++) {
@@ -223,12 +234,17 @@ void drawSheet() {
     float distance=length(q), c=link.w;
     if(distance>=3.) continue;
     vec2 direction=q/max(distance,.0001);
-    float gutter=exp(-sq((distance-1.085)/.055));
+    float sealRadius=1.085+.007*sin(angleOf(q)*5.+u_sites[i].w*2.3);
+    float sealWidth=max(.020,1./u_radius);
+    float gutter=exp(-sq((distance-sealRadius)/sealWidth));
     float shoulder=exp(-sq((distance-1.18)/.20));
     nearFilm=max(nearFilm,exp(-sq((distance-1.15)/.55)));
     float irregular=.65+.35*sin(angleOf(q)*3.+u_sites[i].w*2.3);
     // Raised welds and sagging bridges share the same light as the domes.
     slope+=direction*shoulder*.18*irregular;
+    // Uneven, low double-layer welds catch a thin highlight and a tiny trough.
+    // No colour is added: thickness reads only through its local surface slope.
+    slope+=direction*gutter*.025*irregular;
     // The contact pulls the welded shoulder and adjoining bridges. The same
     // local field relights neighbours; rupture adds one small settling pulse.
     float bridge=exp(-sq((distance-1.30)/.42));
@@ -292,7 +308,8 @@ void main() {
   reflected.xy=turn(reflected.xy,-u_light_angle);
   float fresnel=.047+.953*pow(1.-max(normal.z,0.),4.5);
   float body=1.-smoothstep(.993,1.012,r);
-  float rim=exp(-sq((r-1.027)/.012));
+  float sealWidth=.008+u_seed*.004;
+  float rim=exp(-sq((r-1.027)/sealWidth));
   float outerRim=exp(-sq((r-1.085)/.0065));
   float shadow=exp(-sq((length(p+vec2(-.012,.025))-1.036)/.020));
   vec3 bg=mix(vec3(.78,.85,.91),vec3(.047,.065,.078),u_dark);
@@ -305,7 +322,7 @@ void main() {
   spec*=mix(1.9,1.,u_dark);
   float lipLight=.30+.26*sin(angleOf(q)-u_light_angle-.3)+.18*sin(angleOf(q)*9.+u_seed*13.);
   float litEdge=pow(max(0.,dot(direction,normalize(turn(vec2(-.6,.8),u_light_angle)))),3.);
-  spec+=mix(vec3(1.),vec3(.88,.94,1.),u_dark)*rim*lipLight*mix(.10+.35*litEdge,.18+.55*litEdge,u_dark)*(1.-c*.3);
+  spec+=mix(vec3(1.),vec3(.88,.94,1.),u_dark)*rim*lipLight*mix(.09+.35*litEdge,.15+.55*litEdge,u_dark)*(1.-c*.3);
   spec+=vec3(.84,.93,1.)*outerRim*.015*litEdge*(1.-c*.35);
   float softShoulder=exp(-sq((r-.90)/.105))*body;
   spec+=vec3(.64,.76,.83)*softShoulder*(.025+.26*litEdge)*mix(.30,1.,u_dark)*(1.-c*.4);
