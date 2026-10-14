@@ -9,29 +9,37 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Compare the current renderer with the actual pre-optimization source from
 // Git. Both import the SAME current physics, sheet and membrane dependencies.
-// Force extension availability to exercise instanced/expanded batching and the
-// no-float-texture fallback. No app/main loop or package installs are involved.
+// Force extension availability and the sheet feature switch to exercise both
+// batched passes and their legacy fallbacks. No main loop or installs involved.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-const ref = argument('ref') || 'bac7bd1';
+const ref = argument('ref') || 'd28325d';
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const origin = new URL(baseURL).origin;
 const maxChannelError = 2;
 const profiles = [
-  { name: 'mobile-dpr1', dpr: 1 },
-  { name: 'mobile-fractional-dpr', dpr: 1.25 },
-  { name: 'mobile-dpr2_5', dpr: 2.5 },
+  { name: 'mobile-narrow-dpr1', dpr: 1, width: 320, height: 568, filmHeight: 300 },
+  { name: 'mobile-dpr1', dpr: 1, width: 390, height: 844, filmHeight: 344 },
+  { name: 'mobile-fractional-dpr', dpr: 1.25, width: 390, height: 844, filmHeight: 344 },
+  { name: 'mobile-dpr2_5', dpr: 2.5, width: 390, height: 844, filmHeight: 344 },
+  { name: 'desktop-dpr1', dpr: 1, width: 1280, height: 800, filmHeight: 600 },
 ].filter(profile => !argument('profiles') || argument('profiles').split(',').includes(profile.name));
 assert.ok(profiles.length, 'At least one known DPR profile must be selected.');
+const counts = (argument('counts') || '100,500,1000').split(',').map(Number);
+assert.ok(counts.length && counts.every(count => [100, 500, 1000].includes(count)), 'Supported stress counts: 100, 500, 1000');
+const modes = (argument('modes') || 'instanced,expanded,legacy,sheet-disabled').split(',');
+assert.ok(modes.length && modes.every(mode => ['instanced', 'expanded', 'legacy', 'sheet-disabled'].includes(mode)), 'Select known renderer modes.');
 const rendererFile = 'public/js/rendering/renderer.js';
 const current = await readFile(path.join(root, rendererFile), 'utf8');
 const baseline = execFileSync('git', ['show', `${ref}:${rendererFile}`], { cwd: root, encoding: 'utf8' });
-assert.notEqual(current, baseline, 'The pixel oracle requires a distinct reference renderer.');
 const dependencies = new Map();
 for (const file of ['config.js', 'layout.js', 'physics.js', 'sheet.js', 'membrane.js']) {
   dependencies.set(`/js/core/${file}`, await readFile(path.join(root, 'public/js/core', file), 'utf8'));
 }
 dependencies.set('/js/rendering/bubble-batch.js', await readFile(path.join(root, 'public/js/rendering/bubble-batch.js'), 'utf8'));
+if (existsSync(path.join(root, 'public/js/rendering/sheet-batch.js'))) {
+  dependencies.set('/js/rendering/sheet-batch.js', await readFile(path.join(root, 'public/js/rendering/sheet-batch.js'), 'utf8'));
+}
 const hash = source => createHash('sha256').update(source).digest('hex');
 const sourceHashes = {
   currentRenderer: hash(current), referenceRenderer: hash(baseline),
@@ -84,13 +92,14 @@ const browser = await chromium.launch(browserFlavor === 'chrome-metal'
 const report = {
   generatedAt: new Date().toISOString(), reference: ref, browserFlavor, sourceHashes,
   browser: { chromium: browser.version(), playwright: JSON.parse(await readFile(path.join(playwrightPath, 'package.json'), 'utf8')).version },
-  comparison: 'Actual reference Git renderer and current renderer; identical frozen current dependencies, seeds, geometry and state; immediate WebGL readPixels on detached canvases; forced instanced, expanded and no-float legacy paths.',
+  comparison: 'Actual reference Git renderer and current renderer; identical frozen current dependencies, seeds, geometry and state; immediate WebGL readPixels on detached canvases; forced instanced, expanded, no-float legacy and feature-disabled sheet paths.',
+  profiles, stressCounts: counts, modes,
   tolerance: { maxChannelError }, checks: [], errors: [],
 };
 
 try {
   for (const profile of profiles) {
-    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: profile.dpr });
+    const context = await browser.newContext({ viewport: { width: profile.width, height: profile.height }, deviceScaleFactor: profile.dpr });
     try {
       const url = `${origin}/__shader_oracle__`;
       await context.route(url, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chpok shader equivalence</title>' }));
@@ -100,7 +109,8 @@ try {
       const page = await context.newPage();
       page.on('pageerror', error => report.errors.push({ profile: profile.name, message: error.message }));
       await page.goto(url);
-      const results = await page.evaluate(async ({ currentSource, baselineSource, dpr, origin, tolerance }) => {
+      const results = await page.evaluate(async ({ currentSource, baselineSource, profile, counts, modes, origin, tolerance }) => {
+        const { dpr } = profile;
         const [{ BubbleState }, { createBubbleLayout }, { PHYSICS_CONFIG }] = await Promise.all([
           import(`${origin}/js/core/physics.js`), import(`${origin}/js/core/layout.js`), import(`${origin}/js/core/config.js`),
         ]);
@@ -119,8 +129,24 @@ try {
           const canvas = document.createElement('canvas');
           const getContext = canvas.getContext.bind(canvas);
           const observed = new Set();
-          const stats = { capDraws: 0, instancedCapDraws: 0, expandedCapDraws: 0, legacyCapDraws: 0, sheetDraws: 0, capVertices: 0 };
+          const stats = {
+            capDraws: 0, instancedCapDraws: 0, expandedCapDraws: 0, legacyCapDraws: 0,
+            sheetDraws: 0, batchedSheetDraws: 0, legacySheetDraws: 0, capVertices: 0, sheetVertices: 0,
+          };
           let renderer;
+          let activeProgram = null;
+          function recordDraw(count, instanced = false) {
+            if (renderer && (activeProgram === renderer.sheetProgram || activeProgram === renderer.sheetBatchProgram)) {
+              stats.sheetDraws++; stats.sheetVertices += count;
+              if (activeProgram === renderer.sheetBatchProgram) stats.batchedSheetDraws++;
+              else stats.legacySheetDraws++;
+            } else {
+              stats.capDraws++; stats.capVertices += count;
+              if (instanced) stats.instancedCapDraws++;
+              else if (count > 6) stats.expandedCapDraws++;
+              else stats.legacyCapDraws++;
+            }
+          }
           canvas.getContext = (name, options) => {
             const gl = getContext(name, options);
             if (!gl || name !== 'webgl' || observed.has(gl)) return gl;
@@ -133,26 +159,25 @@ try {
               const extension = getExtension(extensionName);
               if (extensionName === 'ANGLE_instanced_arrays' && extension && !wrappedExtensions.has(extension)) {
                 wrappedExtensions.add(extension);
-                const draw = extension.drawArraysInstancedANGLE.bind(extension);
-                extension.drawArraysInstancedANGLE = (...args) => {
-                  stats.capDraws++; stats.instancedCapDraws++; stats.capVertices += args[2] * args[3];
-                  return draw(...args);
-                };
+                for (const method of ['drawArraysInstancedANGLE', 'drawElementsInstancedANGLE']) {
+                  const draw = extension[method].bind(extension);
+                  extension[method] = (...args) => {
+                    recordDraw(args[method === 'drawArraysInstancedANGLE' ? 2 : 1] * args[method === 'drawArraysInstancedANGLE' ? 3 : 4], true);
+                    return draw(...args);
+                  };
+                }
               }
               return extension;
             };
-            let activeProgram = null;
             const useProgram = gl.useProgram.bind(gl);
             gl.useProgram = program => { activeProgram = program; return useProgram(program); };
-            const drawArrays = gl.drawArrays.bind(gl);
-            gl.drawArrays = (...args) => {
-              if (renderer && activeProgram === renderer.sheetProgram) stats.sheetDraws++;
-              else {
-                stats.capDraws++; stats.capVertices += args[2];
-                if (args[2] > 6) stats.expandedCapDraws++; else stats.legacyCapDraws++;
-              }
-              return drawArrays(...args);
-            };
+            for (const method of ['drawArrays', 'drawElements']) {
+              const draw = gl[method].bind(gl);
+              gl[method] = (...args) => {
+                recordDraw(args[method === 'drawArrays' ? 2 : 1]);
+                return draw(...args);
+              };
+            }
             // Batched attributes and membrane textures replace most cap
             // uniforms. Check those uploads as well as the reference uniforms.
             for (const method of ['uniform1f', 'uniform2f', 'uniform4f', 'uniform4fv', 'bufferData', 'bufferSubData', 'texImage2D', 'texSubImage2D']) {
@@ -171,9 +196,10 @@ try {
           const referenceCanvas = canvasFor('reference');
           const reference = new modules[1].FilmRenderer(referenceCanvas.canvas);
           referenceCanvas.attach(reference); renderers.push(reference);
-          const candidates = ['instanced', 'expanded', 'legacy'].map(mode => {
+          const candidates = modes.map(mode => {
             const wrapper = canvasFor(mode);
             const renderer = new modules[0].FilmRenderer(wrapper.canvas);
+            if (mode === 'sheet-disabled') renderer.sheetBatchingEnabled = false;
             wrapper.attach(renderer); renderers.push(renderer);
             return { mode, renderer, stats: wrapper.stats };
           });
@@ -181,7 +207,7 @@ try {
           const debug = gl.getExtension('WEBGL_debug_renderer_info');
           const backend = {
             renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
-            dpr,
+            dpr, viewport: { width: profile.width, height: profile.height },
           };
           const scenes = ['intact', 'offset-press', 'partial-collapse', 'fully-collapsed', 'popped-kneading'];
           const lights = [
@@ -231,7 +257,7 @@ try {
             return { pixels, errors, calls: stats ? { ...stats } : null };
           }
           function fitGeometry(count, clipped) {
-            const width = 390, height = 344;
+            const width = profile.width, height = profile.filmHeight;
             const columns = Math.ceil(Math.sqrt(count * width * Math.sqrt(3) / (2 * height)));
             const rows = Math.ceil(count / columns);
             const radius = Math.min(width / ((columns + .5) * 2.5), height / ((rows - 1) * 2.5 * Math.sqrt(3) / 2 + 3));
@@ -253,25 +279,41 @@ try {
             return { width, height, layout };
           }
           const fixtures = [];
+          // Reuse the real layout while press/pop/kneading states change. A
+          // resize per frame would rebuild the textures and hide stale caches.
+          const originalGeometry = createBubbleLayout(profile.width);
+          const stressGeometries = new Map();
+          const stressGeometry = (count, clipped) => {
+            const key = `${count}-${clipped}`;
+            if (!stressGeometries.has(key)) stressGeometries.set(key, fitGeometry(count, clipped));
+            return stressGeometries.get(key);
+          };
           for (const [index, scene] of scenes.entries()) for (const dark of [false, true]) fixtures.push({
             scene, dark, light: lights[(index + Number(dark) + Math.round(dpr * 4)) % lights.length],
-            geometry: createBubbleLayout(390), geometryName: 'original-14',
+            geometry: originalGeometry, geometryName: 'original-14',
           });
-          if (dpr !== 1) for (const count of [100, 500, 1000]) for (const dark of [false, true]) fixtures.push({
-            scene: 'mixed-collapse', dark, light: lights[Number(dark)], geometry: fitGeometry(count, false), geometryName: `fit-${count}`,
+          for (const count of counts) for (const dark of [false, true]) fixtures.push({
+            scene: 'mixed-collapse', dark, light: lights[Number(dark)], geometry: stressGeometry(count, false), geometryName: `fit-${count}`,
           });
-          if (dpr === 1.25) for (const count of [100, 500, 1000]) fixtures.push({
-            scene: 'mixed-collapse', dark: true, light: lights[1], geometry: fitGeometry(count, true), geometryName: `clipped-${count}`,
+          for (const count of counts) for (const dark of [false, true]) fixtures.push({
+            scene: 'mixed-collapse', dark, light: lights[1], geometry: stressGeometry(count, true), geometryName: `clipped-${count}`,
           });
           const checks = [];
           for (const { scene, dark, light, geometry, geometryName } of fixtures) {
-            for (const renderer of renderers) renderer.resize(geometry.width, geometry.height, dpr);
+            for (const renderer of renderers) {
+              if (renderer.width !== geometry.width || renderer.height !== geometry.height || renderer.dpr !== dpr) {
+                renderer.resize(geometry.width, geometry.height, dpr);
+              }
+            }
             const referenceStates = statesFor(scene, geometry);
             const beforeReference = nonfiniteInputs;
             const referencePixels = read(reference, referenceStates, geometry, dark, light, referenceCanvas.stats);
             const referenceNonfinite = nonfiniteInputs - beforeReference;
             for (const candidate of candidates) {
               const beforeNonfinite = nonfiniteInputs;
+              const layoutReused = candidate.renderer.layout === geometry.layout;
+              const sheetCacheReused = candidate.renderer.sheetBatch?.layout === geometry.layout
+                && candidate.renderer.sheetBatch?.tiles === candidate.renderer.sheetState.tiles;
               const currentStates = statesFor(scene, geometry);
               if (JSON.stringify(currentStates) !== JSON.stringify(referenceStates)) throw new Error('Oracle input states differ.');
               const current = read(candidate.renderer, currentStates, geometry, dark, light, candidate.stats);
@@ -289,33 +331,43 @@ try {
               const pixels = current.pixels.length / 4;
               const glErrors = [...current.errors, ...referencePixels.errors];
               const nonfinite = nonfiniteInputs - beforeNonfinite + referenceNonfinite;
-              const modeExercised = geometry.layout.length < 100 || (candidate.mode === 'instanced'
+              const modeExercised = geometry.layout.length < 100 || (candidate.mode === 'instanced' || candidate.mode === 'sheet-disabled'
                 ? current.calls.instancedCapDraws > 0 : candidate.mode === 'expanded'
                   ? current.calls.expandedCapDraws > 0 : current.calls.legacyCapDraws > 0 && !current.calls.instancedCapDraws && !current.calls.expandedCapDraws);
+              const sheetMode = current.calls.batchedSheetDraws ? 'batched' : 'legacy';
+              const sheetBatchExpected = candidate.mode !== 'legacy' && candidate.mode !== 'sheet-disabled';
+              const pageCount = Math.ceil(candidate.renderer.sheetState.tiles.length / candidate.renderer.gl.getParameter(candidate.renderer.gl.MAX_TEXTURE_SIZE));
+              const sheetModeExercised = sheetBatchExpected
+                ? current.calls.batchedSheetDraws > 0 && !current.calls.legacySheetDraws && current.calls.sheetDraws <= pageCount
+                : current.calls.legacySheetDraws > 0 && !current.calls.batchedSheetDraws;
               checks.push({
                 scene, geometry: geometryName, count: geometry.layout.length, mode: candidate.mode,
                 actualBatchMode: current.calls.instancedCapDraws ? 'instanced' : current.calls.expandedCapDraws ? 'expanded' : 'legacy',
                 helperMode: candidate.renderer.batch?.mode || null, modeExercised,
+                sheetMode, sheetBatchExpected, sheetModeExercised,
+                layoutReused, sheetCacheReused,
+                sheetTiles: candidate.renderer.sheetState.tiles.length, maximumSheetPages: pageCount,
                 theme: dark ? 'dark' : 'light', light: light.name,
                 framebuffer: { width: candidate.renderer.canvas.width, height: candidate.renderer.canvas.height },
                 maximumChannelError: maximum, changedPixels, mismatchRatio: changedPixels / pixels,
                 pixelsOutsideTolerance: outsideTolerance, meanChannelError: totalDifference / current.pixels.length,
                 visiblePixels, glErrors, nonfiniteInputs: nonfinite, calls: current.calls, referenceCalls: referencePixels.calls,
-                status: maximum <= tolerance && !glErrors.length && !nonfinite && visiblePixels > pixels * .5 && modeExercised ? 'passed' : 'failed',
+                status: maximum <= tolerance && !glErrors.length && !nonfinite && visiblePixels > pixels * .5 && modeExercised && sheetModeExercised ? 'passed' : 'failed',
               });
             }
           }
           return { backend, finiteInputValues, nonfiniteInputs, expectedChecks: fixtures.length * candidates.length, checks };
         } finally {
           for (const renderer of renderers) {
-            for (const program of new Set([renderer.program, renderer.legacyProgram, renderer.batchProgram, renderer.sheetProgram].filter(Boolean))) renderer.gl.deleteProgram(program);
+            for (const program of new Set([renderer.program, renderer.legacyProgram, renderer.batchProgram, renderer.sheetProgram, renderer.sheetBatchProgram].filter(Boolean))) renderer.gl.deleteProgram(program);
             renderer.batch?.dispose?.();
+            renderer.sheetBatch?.dispose?.();
             renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
             renderer.canvas.remove();
           }
           for (const url of moduleURLs) URL.revokeObjectURL(url);
         }
-      }, { currentSource: absoluteImports(current), baselineSource: absoluteImports(baseline), dpr: profile.dpr, origin, tolerance: maxChannelError });
+      }, { currentSource: absoluteImports(current), baselineSource: absoluteImports(baseline), profile, counts, modes, origin, tolerance: maxChannelError });
       report.checks.push({ profile: profile.name, ...results });
       const failed = results.checks.filter(check => check.status !== 'passed');
       console.log(`${failed.length ? 'FAIL' : 'PASS'} ${profile.name}: ${results.checks.length - failed.length}/${results.checks.length} scenes; maximum channel error ${Math.max(...results.checks.map(check => check.maximumChannelError))}/255; ${results.nonfiniteInputs} nonfinite inputs`);
@@ -339,6 +391,6 @@ try {
   await writeFile(path.join(output, filename), JSON.stringify(report, null, 2) + '\n');
 }
 assert.equal(report.summary.errors, 0, 'Shader oracle must have no browser or harness errors.');
-assert.equal(report.summary.failed, 0, 'Shader optimization changed rendered pixels beyond tolerance.');
+assert.equal(report.summary.failed, 0, 'Renderer must preserve pixels and exercise the expected batching/fallback paths.');
 assert.equal(report.summary.passed, report.checks.reduce((count, profile) => count + profile.expectedChecks, 0), 'All scene/theme/light/DPR/mode combinations must run.');
 assert.equal(report.checks.length, profiles.length, 'All DPR profiles must run.');

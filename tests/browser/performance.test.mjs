@@ -121,6 +121,8 @@ const raf=()=>new Promise(resolve=>requestAnimationFrame(resolve));
 const syncPixel=new Uint8Array(4);
 const angle=gl.getExtension('ANGLE_instanced_arrays');
 const batchFor=()=>renderer.bubbleBatch||renderer.batch||renderer.capBatch;
+const sheetBatchFor=()=>renderer.sheetBatchingEnabled&&renderer.sheetBatchProgram&&renderer.sheetBatch?.active?renderer.sheetBatch:null;
+const isSheetProgram=program=>program===renderer.sheetProgram||program===renderer.sheetBatchProgram;
 const legacyQuad=${paired ? "gl.getVertexAttrib(0,gl.VERTEX_ATTRIB_ARRAY_BUFFER_BINDING)" : "null"};
 const prepareVersion=version=>{renderer=renderers[version];if(version==='baseline'&&legacyQuad){gl.bindBuffer(gl.ARRAY_BUFFER,legacyQuad);gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);if(angle)for(let i=0;i<6;i++)angle.vertexAttribDivisorANGLE(i,0);for(let i=1;i<6;i++)gl.disableVertexAttribArray(i)}};
 const syncRead=()=>gl.readPixels(0,0,1,1,gl.RGBA,gl.UNSIGNED_BYTE,syncPixel);
@@ -155,12 +157,13 @@ function geometryDetails(layout){
   const visible=layout.filter(pos=>{const extent=pos.radius*1.38;return !(pos.x+extent<0||pos.y+extent<0||pos.x-extent>renderer.width||pos.y-extent>renderer.height)}).length;
   const batch=batchFor();
   if(batch?.available){const actual=[...batch.indices];const expected=layout.map((site,index)=>({site,index})).filter(({site})=>{const extent=site.radius*1.38;return !(site.x+extent<0||site.y+extent<0||site.x-extent>renderer.width||site.y-extent>renderer.height)}).map(value=>value.index);if(actual.length!==expected.length||actual.some((value,index)=>value!==expected[index]))throw new Error('Batch dropped or reordered visible cap identities')}
-  return {batchMode:batch?.available?batch.mode:'legacy',batchCapacity:batch?.available?batch.capacity:0,batchChunks:batch?.available?batch.chunks.length:visible,tileCount:tiles.length,maxLocalSites:Math.max(...tiles.map(t=>t.indices.length)),visibleDomes:visible,sitesTouchingSheet:used.size,coveredArea,noDroppedSites:true,radius:layout[0].radius};
+  const sheetBatch=sheetBatchFor();
+  return {batchMode:batch?.available?batch.mode:'legacy',batchCapacity:batch?.available?batch.capacity:0,batchChunks:batch?.available?batch.chunks.length:visible,sheetBatchMode:sheetBatch?'batched':'legacy',sheetBatchPages:sheetBatch?sheetBatch.pages.length:0,expectedSheetDraws:sheetBatch?sheetBatch.pages.length:tiles.length,tileCount:tiles.length,maxLocalSites:Math.max(...tiles.map(t=>t.indices.length)),visibleDomes:visible,sitesTouchingSheet:used.size,coveredArea,noDroppedSites:true,radius:layout[0].radius};
 }
 function countCalls(draw){
   const counts={drawArrays:0,drawArraysInstancedANGLE:0,totalDrawCalls:0,sheetDraws:0,capDraws:0,capInstances:0,viewport:0,scissor:0,uniforms:0,bufferData:0,bufferSubData:0,bufferUploadBytes:0,texImage2D:0,texSubImage2D:0,textureUploadBytes:0};
   const saved=new Map();let program=null;
-  const recordDraw=(name,args)=>{counts[name]++;counts.totalDrawCalls++;if(program===renderer.sheetProgram)counts.sheetDraws++;else{counts.capDraws++;counts.capInstances+=name==='drawArraysInstancedANGLE'?args[3]:args[2]/6}};
+  const recordDraw=(name,args)=>{counts[name]++;counts.totalDrawCalls++;if(isSheetProgram(program))counts.sheetDraws++;else{counts.capDraws++;counts.capInstances+=name==='drawArraysInstancedANGLE'?args[3]:args[2]/6}};
   for(const name of ['drawArrays','viewport','scissor','useProgram','uniform1f','uniform1i','uniform2f','uniform4f','uniform4fv','bufferData','bufferSubData','texImage2D','texSubImage2D']){
     const original=gl[name];saved.set(name,original);
     gl[name]=function(...args){
@@ -180,7 +183,7 @@ function countCalls(draw){
 function setPass(pass){
   const originalDraw=gl.drawArrays,originalUse=gl.useProgram,originalInstanced=angle?.drawArraysInstancedANGLE;let program=null;
   if(pass==='both')return()=>{};
-  const allowed=()=>pass==='sheet'?program===renderer.sheetProgram:program!==renderer.sheetProgram;
+  const allowed=()=>pass==='sheet'?isSheetProgram(program):!isSheetProgram(program);
   gl.useProgram=function(programValue){program=programValue;return originalUse.call(gl,programValue)};
   gl.drawArrays=function(...args){if(allowed())return originalDraw.apply(gl,args)};
   if(angle)angle.drawArraysInstancedANGLE=function(...args){if(allowed())return originalInstanced.apply(angle,args)};
@@ -237,7 +240,7 @@ async function runPaired(options){
   // queries are read only after an asynchronous browser task. MessageChannel
   // yields without inserting a vSync idle period between paired samples.
   for(let i=0;i<8;i++)for(const version of ['baseline','current']){prepareVersion(version);draw();syncRead()}
-  const pairedCalls={};for(const version of ['baseline','current']){prepareVersion(version);pairedCalls[version]=countCalls(draw);if(pairedCalls[version].capInstances!==geometryDetails(layout).visibleDomes)throw new Error('Paired cap submission mismatch')}
+  const pairedCalls={},pairedGeometry={};for(const version of ['baseline','current']){prepareVersion(version);pairedCalls[version]=countCalls(draw);const geometry=geometryDetails(layout);pairedGeometry[version]=geometry;if(pairedCalls[version].capInstances!==geometry.visibleDomes)throw new Error('Paired cap submission mismatch');if(pairedCalls[version].sheetDraws!==geometry.expectedSheetDraws)throw new Error('Paired sheet submission mismatch')}
   const pairs=[],values={baseline:[],current:[]},submission={baseline:[],current:[]},diagnostic={baseline:[],current:[]};
   const started=performance.now();let disjointPairs=0;
   for(let sample=0;sample<20;sample++){
@@ -254,7 +257,7 @@ async function runPaired(options){
   if(gl.getError()!==gl.NO_ERROR||gl.isContextLost())throw new Error('Paired render WebGL error');
   const ratios=pairs.map(pair=>pair.currentToBaselineGpuRatio),cpuRatios=pairs.map(pair=>pair.currentToBaselineCpuRatio).filter(Number.isFinite);
   const versions=Object.fromEntries(['baseline','current'].map(version=>[version,{gpuMs:stats(values[version]),cpuSubmissionMs:stats(submission[version]),renderPlusReadbackMs:stats(diagnostic[version])}]));
-  return {count,state,mode:'fit',dpr,geometry:geometryDetails(layout),versions,calls:pairedCalls,pairedGpuRatio:stats(ratios),pairedCpuRatio:stats(cpuRatios),ratioP10:percentile(ratios,.1),ratioP90:percentile(ratios,.9),currentFasterPairs:ratios.filter(value=>value<1).length,
+  return {count,state,mode:'fit',dpr,geometry:pairedGeometry.current,geometryByVersion:pairedGeometry,versions,calls:pairedCalls,pairedGpuRatio:stats(ratios),pairedCpuRatio:stats(cpuRatios),ratioP10:percentile(ratios,.1),ratioP90:percentile(ratios,.9),currentFasterPairs:ratios.filter(value=>value<1).length,
     pairs,disjointPairs,initialization,wallMs:performance.now()-started,error:0,limits:'Baseline renderer from ${pairedRef} with ${pairedDependencies} dependencies; fixed seeds/layout/coupling. Both programs share one WebGL context; legacy quad state is restored before its samples outside measured windows. Stable buffer/texture upload counts are captured after warmup. Alternating AB/BA query samples yield withMessageChannel, not vSync. Ratios may contain clock/driver noise.'};
 }
 window.__benchmark={backend,runPaired,run:async options=>{
@@ -334,7 +337,7 @@ try {
       for (const count of counts) for (const mode of ['fit', 'window']) for (const state of ['intact', 'popped']) {
         const value = await page.evaluate(options => __benchmark.run(options), { ...profile, count, mode, state });
         assert.equal(value.geometry.noDroppedSites, true);
-        assert.equal(value.calls.sheetDraws, value.geometry.tileCount);
+        assert.equal(value.calls.sheetDraws, value.geometry.expectedSheetDraws);
         assert.equal(value.calls.capInstances, value.geometry.visibleDomes);
         assert.equal(value.calls.capDraws, value.geometry.batchChunks);
         assert.equal(value.error, 0);
@@ -372,10 +375,10 @@ try {
   } catch { report.verifiedRuntimeCommit=null; }
   await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
   const escape = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
-  const sourceDescription=`<p>Measured Git HEAD: <code>${escape(report.head.slice(0,12))}</code>; verified runtime source commit: <code>${escape(report.verifiedRuntimeCommit?.slice(0,12)||'uncommitted snapshot')}</code>; source snapshot: ${escape(report.ref||'working tree')}; baseline reference: <code>${escape(report.pairedRef||report.ref||'none')}</code>. Renderer SHA256: <code>${escape(report.sourceHashes['/js/rendering/renderer.js']?.slice(0,16)||'unknown')}</code>; bubble-batch SHA256: <code>${escape(report.sourceHashes['/js/rendering/bubble-batch.js']?.slice(0,16)||'absent (legacy reference)')}</code>.</p>`;
+  const sourceDescription=`<p>Measured Git HEAD: <code>${escape(report.head.slice(0,12))}</code>; verified runtime source commit: <code>${escape(report.verifiedRuntimeCommit?.slice(0,12)||'uncommitted snapshot')}</code>; source snapshot: ${escape(report.ref||'working tree')}; baseline reference: <code>${escape(report.pairedRef||report.ref||'none')}</code>. Renderer SHA256: <code>${escape(report.sourceHashes['/js/rendering/renderer.js']?.slice(0,16)||'unknown')}</code>; bubble-batch SHA256: <code>${escape(report.sourceHashes['/js/rendering/bubble-batch.js']?.slice(0,16)||'absent (legacy reference)')}</code>; sheet-batch SHA256: <code>${escape(report.sourceHashes['/js/rendering/sheet-batch.js']?.slice(0,16)||'absent (legacy reference)')}</code>.</p>`;
   const ms = value => value == null ? '—' : value.toFixed(2);
-  const pairedRows=report.pairedCases.map(value=>`<tr><td>${escape(value.profile)}</td><td>${value.count}</td><td>${value.state}</td><td>${value.versions.baseline.cpuSubmissionMs.p50.toFixed(3)}</td><td>${value.versions.current.cpuSubmissionMs.p50.toFixed(3)}</td><td>${(100*(1-value.pairedCpuRatio.p50)).toFixed(1)}%</td><td>${ms(value.versions.baseline.gpuMs.p50)}</td><td>${ms(value.versions.current.gpuMs.p50)}</td><td>${(100*(1-value.pairedGpuRatio.p50)).toFixed(1)}%</td><td>${value.calls.baseline.capDraws} → ${value.calls.current.capDraws}</td><td>${value.calls.baseline.totalDrawCalls} → ${value.calls.current.totalDrawCalls}</td><td>${value.ratioP10.toFixed(3)} / ${value.ratioP90.toFixed(3)}</td><td>${value.currentFasterPairs}/${value.pairs.length}</td></tr>`).join('');
-  const pairedTable=report.pairedCases.length?`<h2>Paired renderer probe</h2><p>${escape(report.pairedCases[0].limits)}</p><p>Warm current texture upload: ${report.pairedCases.every(value=>value.calls.current.textureUploadBytes===0)?'0 bytes per frame in every paired case':'see JSON for each case'}; dynamic record buffers still update.</p><table><thead><tr><th>Host viewport</th><th>Bubbles</th><th>State</th><th>Baseline CPU p50 ms</th><th>Current CPU p50 ms</th><th>Median CPU reduction</th><th>Baseline GPU p50 ms</th><th>Current GPU p50 ms</th><th>Median GPU reduction</th><th>Cap draws</th><th>Total draws</th><th>GPU ratio p10 / p90</th><th>GPU faster pairs</th></tr></thead><tbody>${pairedRows}</tbody></table>`:'';
+  const pairedRows=report.pairedCases.map(value=>`<tr><td>${escape(value.profile)}</td><td>${value.count}</td><td>${value.state}</td><td>${value.versions.baseline.cpuSubmissionMs.p50.toFixed(3)}</td><td>${value.versions.current.cpuSubmissionMs.p50.toFixed(3)}</td><td>${(100*(1-value.pairedCpuRatio.p50)).toFixed(1)}%</td><td>${ms(value.versions.baseline.gpuMs.p50)}</td><td>${ms(value.versions.current.gpuMs.p50)}</td><td>${(100*(1-value.pairedGpuRatio.p50)).toFixed(1)}%</td><td>${value.calls.baseline.sheetDraws} → ${value.calls.current.sheetDraws}</td><td>${value.calls.baseline.capDraws} → ${value.calls.current.capDraws}</td><td>${value.calls.baseline.totalDrawCalls} → ${value.calls.current.totalDrawCalls}</td><td>${value.ratioP10.toFixed(3)} / ${value.ratioP90.toFixed(3)}</td><td>${value.currentFasterPairs}/${value.pairs.length}</td></tr>`).join('');
+  const pairedTable=report.pairedCases.length?`<h2>Paired renderer probe</h2><p>${escape(report.pairedCases[0].limits)}</p><p>Warm current texture upload: ${report.pairedCases.every(value=>value.calls.current.textureUploadBytes===0)?'0 bytes per frame in every paired case':'see JSON for each case'}; see JSON for dynamic texture and buffer updates.</p><table><thead><tr><th>Host viewport</th><th>Bubbles</th><th>State</th><th>Baseline CPU p50 ms</th><th>Current CPU p50 ms</th><th>Median CPU reduction</th><th>Baseline GPU p50 ms</th><th>Current GPU p50 ms</th><th>Median GPU reduction</th><th>Sheet draws</th><th>Cap draws</th><th>Total draws</th><th>GPU ratio p10 / p90</th><th>GPU faster pairs</th></tr></thead><tbody>${pairedRows}</tbody></table>`:'';
   const rows = report.cases.map(value => `<tr><td>${escape(value.profile)}</td><td>${value.count}</td><td>${value.mode}</td><td>${value.state}</td><td>${value.geometry.visibleDomes}/${value.count}</td><td>${value.calls.totalDrawCalls}</td><td>${ms(value.timing.cpuSubmissionMs.p50)}</td><td>${ms(value.timing.completedRenderMs.p50)}</td><td>${ms(value.timing.gpuTimerMs.p50)}</td><td>${ms(value.timing.gpuTimerMs.p95)}</td><td>${ms(value.timing.rafIntervalsMs.p95)}</td><td>${value.timing.completedRenderMs.samples}${value.timing.lowSampleCount?' *':''}</td></tr>`).join('');
   await writeFile(path.join(output, `performance-${label}.html`), `<!doctype html><meta charset="utf-8"><title>Chpok rendering — ${escape(label)}</title><style>body{font:15px system-ui;margin:32px;color:#222}table{border-collapse:collapse;font-variant-numeric:tabular-nums}th,td{padding:8px 12px;border-bottom:1px solid #ddd;text-align:right}th:first-child,td:first-child{text-align:left}li{max-width:100ch;margin:8px 0}</style><h1>Chpok rendering — ${escape(label)}</h1><p>${escape(report.generatedAt)} · Chromium ${escape(report.browser.chromium)}</p>${sourceDescription}<p>${escape(report.profiles.map(profile=>`${profile.name} ${profile.width}×${profile.height} DPR${profile.dpr}: ${profile.backend.unmaskedRenderer||profile.backend.renderer}`).join(' · '))}</p><ul>${report.limits.map(value=>`<li>${escape(value)}</li>`).join('')}</ul><table><thead><tr><th>Host viewport</th><th>Bubbles</th><th>Layout</th><th>State</th><th>Visible</th><th>Draws</th><th>CPU p50 ms</th><th>Render + readback p50 ms</th><th>GPU p50 ms</th><th>GPU p95 ms</th><th>rAF p95 ms</th><th>Sync samples</th></tr></thead><tbody>${rows}</tbody></table><p>* Low sample count; inspect JSON for all p50/p95 samples and diagnostic pass/DPR ablations.</p>${pairedTable}`);
 }

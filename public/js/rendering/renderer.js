@@ -3,6 +3,7 @@
 import { makeMembrane } from '../core/membrane.js';
 import { MAX_SHEET_SITES, SheetState } from '../core/sheet.js';
 import { BubbleBatch } from './bubble-batch.js';
+import { SheetBatch } from './sheet-batch.js';
 const vertex = `
 attribute vec2 a_position;
 varying vec2 v_uv;
@@ -27,6 +28,16 @@ void main() {
   // This keeps subpixel placement identical, including fractional screen DPR.
   vec2 pixel=a_rect.xy+(a_position*.5+.5)*a_rect.zw;
   gl_Position=vec4(pixel/u_framebuffer*2.-1.,0.,1.);
+}
+`;
+const sheetBatchVertex = `
+attribute vec2 a_position, a_tile;
+uniform vec2 u_framebuffer;
+varying vec2 v_uv, v_tile;
+void main() {
+  vec2 clip=a_position/u_framebuffer*2.-1.;
+  v_uv=clip;v_tile=a_tile;
+  gl_Position=vec4(clip,0.,1.);
 }
 `;
 const fragment = `
@@ -69,8 +80,15 @@ uniform vec4 u_folds[5], u_foldProfile[5], u_pockets[3], u_dent;
 uniform float u_air;
 #endif
 // A tile only sees local pockets; shader size never depends on sheet count.
+#ifdef SHEET_BATCH_PASS
+varying vec2 v_tile;
+uniform highp sampler2D u_sheet_sites, u_sheet_links;
+uniform float u_sheet_rows;
+#define u_site_count int(v_tile.y+.5)
+#else
 uniform vec4 u_sites[${MAX_SHEET_SITES}], u_links[${MAX_SHEET_SITES}];
 uniform int u_site_count;
+#endif
 const float PI = 3.14159265359;
 float sq(float x) { return x*x; }
 float angleOf(vec2 v) { return dot(v,v)<.00000001?0.:atan(v.y,v.x); }
@@ -286,17 +304,24 @@ void drawSheet() {
   vec2 exitDirection=-keyDirection();
   for(int i=0;i<${MAX_SHEET_SITES};i++) {
     if(i>=u_site_count) break;
+#ifdef SHEET_BATCH_PASS
+    vec2 sheetUV=vec2((float(i)+.5)/${MAX_SHEET_SITES}.,v_tile.x/u_sheet_rows);
+    vec4 site=texture2D(u_sheet_sites,sheetUV);
+    vec4 link=texture2D(u_sheet_links,sheetUV);
+#else
+    vec4 site=u_sites[i];
     vec4 link=u_links[i];
-    vec2 q=((pixel-u_sites[i].xy)/u_sites[i].z-link.xy)*vec2(1.,-1.);
+#endif
+    vec2 q=((pixel-site.xy)/site.z-link.xy)*vec2(1.,-1.);
     float distance=length(q), c=link.w;
     if(distance>=3.) continue;
     vec2 direction=q/max(distance,.0001);
-    float sealRadius=1.085+.007*sin(angleOf(q)*5.+u_sites[i].w*2.3);
+    float sealRadius=1.085+.007*sin(angleOf(q)*5.+site.w*2.3);
     float sealWidth=max(.020,1./u_radius);
     float gutter=exp(-sq((distance-sealRadius)/sealWidth));
     float shoulder=exp(-sq((distance-1.18)/.20));
     nearFilm=max(nearFilm,exp(-sq((distance-1.15)/.55)));
-    float irregular=.65+.35*sin(angleOf(q)*3.+u_sites[i].w*2.3);
+    float irregular=.65+.35*sin(angleOf(q)*3.+site.w*2.3);
     // Raised welds and sagging bridges share the same light as the domes.
     slope+=direction*shoulder*.18*irregular;
     // Uneven, low double-layer welds catch a thin highlight and a tiny trough.
@@ -314,7 +339,7 @@ void drawSheet() {
     castShadow=max(castShadow,exp(-sq((shadowDistance-1.07)/.14))*shadowSide*(1.-c*.52));
     bounce=max(bounce,shoulder*pow(max(0.,dot(direction,exitDirection)),5.)*irregular);
     if(distance<3.) {
-      vec2 transmitted=transmittedPool(q,exitDirection,c,u_sites[i].w);
+      vec2 transmitted=transmittedPool(q,exitDirection,c,site.w);
       // Overlapping patches stay local instead of adding an opaque white haze.
       pool=max(pool,transmitted.x);poolShade=max(poolShade,transmitted.y);
     }
@@ -463,6 +488,7 @@ export class FilmRenderer {
       const fs=compile(gl.FRAGMENT_SHADER,source),program=gl.createProgram();
       gl.attachShader(program,vs);gl.attachShader(program,fs);
       for(const [index,name] of ['a_position','a_rect','a_state','a_touchRadius','a_link','a_record'].entries()) gl.bindAttribLocation(program,index,name);
+      gl.bindAttribLocation(program,1,'a_tile');
       gl.linkProgram(program);gl.deleteShader(vs);gl.deleteShader(fs);
       if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
       return program;
@@ -471,6 +497,9 @@ export class FilmRenderer {
     // program and site lists from caps. Each stays within 64 uniform vectors.
     this.legacyProgram=makeProgram(fragment);
     this.sheetProgram=makeProgram('#define SHEET_PASS\n'+fragment);
+    this.sheetBatch=new SheetBatch(gl);
+    this.sheetBatchProgram=this.sheetBatch.available?makeProgram('#define SHEET_PASS\n#define SHEET_BATCH_PASS\n'+fragment,sheetBatchVertex):null;
+    this.sheetBatchingEnabled=true;
     this.batch=new BubbleBatch(gl);
     this.batchProgram=this.batch.available?makeProgram('#define BATCH_PASS\n'+fragment,batchVertex):null;
     this.batchingEnabled=true;
@@ -481,7 +510,7 @@ export class FilmRenderer {
     const a=gl.getAttribLocation(this.program,'a_position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
     const uniforms=program=>{
       const locations={};
-      for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','resolution','origin','radius','site_count','link','framebuffer','membranes','membrane_rows']) locations[name]=gl.getUniformLocation(program,'u_'+name);
+      for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','resolution','origin','radius','site_count','link','framebuffer','membranes','membrane_rows','sheet_sites','sheet_links','sheet_rows']) locations[name]=gl.getUniformLocation(program,'u_'+name);
       for(const name of ['folds','foldProfile','pockets','sites','links']) locations[name]=gl.getUniformLocation(program,'u_'+name+'[0]');
       return locations;
     };
@@ -489,6 +518,7 @@ export class FilmRenderer {
     this.batchUniforms=this.batchProgram?uniforms(this.batchProgram):null;
     this.uniforms=this.batchUniforms||this.legacyUniforms;
     this.sheetUniforms=uniforms(this.sheetProgram);
+    this.sheetBatchUniforms=this.sheetBatchProgram?uniforms(this.sheetBatchProgram):null;
     this.sites=new Float32Array(MAX_SHEET_SITES*4);
     this.links=new Float32Array(MAX_SHEET_SITES*4);
     this.sheetState=new SheetState();
@@ -516,7 +546,8 @@ export class FilmRenderer {
     const batched=this.batchingEnabled&&this.batchProgram;
     this.program=batched?this.batchProgram:this.legacyProgram;
     this.uniforms=batched?this.batchUniforms:this.legacyUniforms;
-    const gl=this.gl,s=this.sheetUniforms,u=this.uniforms;
+    const sheetBatched=this.sheetBatchingEnabled&&this.sheetBatchProgram&&this.sheetBatch.supports(layout.length);
+    const gl=this.gl,s=sheetBatched?this.sheetBatchUniforms:this.sheetUniforms,u=this.uniforms;
     if(this.layout!==layout) {
       this.layout=layout;
       this.sheetState.resize(layout,this.width,this.height);
@@ -526,7 +557,7 @@ export class FilmRenderer {
     gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);
     gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
     gl.disable(gl.SCISSOR_TEST);
-    gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.sheetProgram);
+    gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(sheetBatched?this.sheetBatchProgram:this.sheetProgram);
     gl.uniform1f(s.dark,dark?1:0);
     gl.uniform2f(s.light,light.x,light.y);
     gl.uniform1f(s.light_angle,Number.isFinite(light.angle)?light.angle:0);
@@ -534,6 +565,14 @@ export class FilmRenderer {
     gl.uniform1f(s.radius,layout[0].radius);
     gl.uniform1f(s.seed,.417);
     gl.viewport(0,0,this.canvas.width,this.canvas.height);
+    if(sheetBatched) {
+      gl.uniform2f(s.framebuffer,this.canvas.width,this.canvas.height);
+      this.sheetBatch.draw(bubbles,layout,deformation,this.sheetState.tiles,this.geometry,s);
+      // Restore the shared quad before either cap submission path uses it.
+      gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);
+      gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+    } else {
+    this.sheetBatch.active=false;
     gl.enable(gl.SCISSOR_TEST);
     for(const tile of this.sheetState.tiles) {
       const indices=tile.indices;
@@ -558,6 +597,7 @@ export class FilmRenderer {
       gl.drawArrays(gl.TRIANGLES,0,6);
     }
     gl.disable(gl.SCISSOR_TEST);
+    }
     gl.useProgram(this.program);
     gl.uniform1f(u.dark,dark?1:0);gl.uniform1f(u.time,time);
     gl.uniform2f(u.light,light.x,light.y);
