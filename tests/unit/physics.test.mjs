@@ -57,6 +57,92 @@ test('off-centre contact retains its direction and displaces more air', () => {
   assert.ok(edge.y < -0.15);
 });
 
+test('a sealed pocket yields early, resists in the middle and compresses faster just before rupture', () => {
+  const bubble = new BubbleState(20, 2);
+  bubble.press(0.65, 0);
+  assert.ok(bubble.compression >= 0.16, 'first contact keeps its immediate visible dent');
+  const samples = [];
+  let previous = 0;
+  for (const progress of [0.08, 0.28, 0.44, 0.64, 0.8, 0.98]) {
+    assert.equal(advance(bubble, (progress - previous) * 2), 0);
+    samples.push(bubble.compression);
+    previous = progress;
+  }
+  const earlyYield = (samples[1] - samples[0]) / 0.2;
+  const middleResistance = (samples[3] - samples[2]) / 0.2;
+  const finalCompression = (samples[5] - samples[4]) / 0.18;
+  assert.ok(earlyYield > middleResistance * 1.8, 'air initially gives way before tension slows the dent');
+  assert.ok(finalCompression > middleResistance * 2, 'the last push visibly overcomes the resisting membrane');
+  assert.ok(samples[5] > 0.72 && samples[5] < 0.84, 'final deformation keeps the existing modest scale');
+  assert.equal(advance(bubble, 0.04), 1, 'the profile does not add any hold time');
+});
+
+test('sealed air tension increases the opposite bulge near rupture without oversizing it', () => {
+  const bubble = new BubbleState(21, 2);
+  bubble.press(-0.7, 0.25);
+  advance(bubble, 0.9);
+  const middleRatio = bubble.bulge / bubble.compression;
+  advance(bubble, 1);
+  assert.ok(bubble.bulge / bubble.compression > middleRatio * 1.05);
+  assert.ok(bubble.bulge < 0.45, 'the free side tightens without ballooning');
+  bubble.release();
+  advance(bubble, 1.2);
+  assert.equal(bubble.popped, false);
+  assert.equal(bubble.compression, 0);
+  assert.equal(bubble.bulge, 0);
+});
+
+test('the default fast hold still shows a quicker final push through resistance', () => {
+  for (const frequency of [30, 60, 120]) {
+    const bubble = new BubbleState(22);
+    bubble.press(0.5, 0);
+    advance(bubble, 0.15, frequency);
+    const middleStart = bubble.compression;
+    advance(bubble, 0.054, frequency);
+    const middleGain = bubble.compression - middleStart;
+    advance(bubble, 0.036, frequency);
+    const finalStart = bubble.compression;
+    advance(bubble, 0.054, frequency);
+    assert.ok(bubble.compression - finalStart > middleGain * 1.1,
+      `the last push stays visible at ${frequency} Hz despite spring smoothing`);
+    assert.equal(bubble.popped, false);
+    assert.equal(advance(bubble, 0.006, frequency), 1);
+  }
+});
+
+test('each pocket has a tiny reproducible resistance difference while all retain the same timer', () => {
+  const bubbles = Array.from({ length: 24 }, (_, index) => new BubbleState(index));
+  for (const bubble of bubbles) {
+    bubble.press(0.6, -0.2);
+    assert.equal(advance(bubble, 0.18), 0);
+  }
+  const compressions = bubbles.map(bubble => bubble.compression);
+  const spread = Math.max(...compressions) - Math.min(...compressions);
+  assert.ok(spread > 0.001 && spread < 0.025, 'the visual response varies subtly, never by a large amount');
+  const repeat = new BubbleState(0);
+  repeat.press(0.6, -0.2);
+  advance(repeat, 0.18);
+  assert.equal(repeat.compression, bubbles[0].compression);
+  repeat.reset();
+  repeat.press(0.6, -0.2);
+  advance(repeat, 0.18);
+  assert.equal(repeat.compression, bubbles[0].compression, 'a sheet reset retains its pocket stiffness');
+  for (const bubble of bubbles) assert.equal(advance(bubble, 0.12), 1);
+});
+
+test('resistance preserves exact custom hold timing at 30, 60 and 120 Hz', () => {
+  for (const frequency of [30, 60, 120]) {
+    for (const duration of [0.2, 0.3, 2]) {
+      const bubble = new BubbleState(frequency, duration);
+      bubble.press(0.5, -0.3);
+      assert.equal(advance(bubble, duration - 1 / frequency, frequency), 0);
+      assert.equal(bubble.popped, false);
+      assert.equal(advance(bubble, 1 / frequency, frequency), 1);
+      assert.equal(advance(bubble, 0.1, frequency), 0);
+    }
+  }
+});
+
 test('opposite edge ruptures preserve their creases after new film contact and settling', () => {
   for (const [x, y] of [[-0.8, 0.25], [0.8, -0.25]]) {
     const bubble = new BubbleState(8);

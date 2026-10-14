@@ -19,6 +19,23 @@ function seedFor(index) {
   return ((value ^ (value >>> 15)) >>> 0) / 4294967296;
 }
 
+// A soft initial yield gives way to taut plastic, then the last push deepens
+// the dent quickly. This shapes only deformation: rupture still uses the
+// nominal hold timer. Quadratics avoid per-frame powers or allocations.
+function resistanceProfile(progress, yieldEnd, tensionEnd) {
+  const profile = PHYSICS_CONFIG.resistance;
+  if (progress < yieldEnd) {
+    const phase = progress / yieldEnd;
+    return profile.yieldCompression * phase * (2 - phase);
+  }
+  if (progress < tensionEnd) {
+    return profile.yieldCompression + (profile.tensionCompression - profile.yieldCompression)
+      * (progress - yieldEnd) / (tensionEnd - yieldEnd);
+  }
+  const phase = (progress - tensionEnd) / (1 - tensionEnd);
+  return profile.tensionCompression + (1 - profile.tensionCompression) * phase * phase;
+}
+
 /**
  * One sealed air pocket. All positions are relative to its centre, in [-1, 1].
  * The renderer places the extra bulge opposite (x, y), and derives normals from
@@ -28,6 +45,12 @@ export class BubbleState {
   constructor(index = 0, holdSeconds = DEFAULT_HOLD_SECONDS) {
     this.index = index;
     this.seed = seedFor(index);
+    // Fixed pocket characteristics survive reset and never alter hold time.
+    const variation = this.seed - 0.5;
+    this._yieldEnd = PHYSICS_CONFIG.resistance.yieldEnd + variation * PHYSICS_CONFIG.resistance.yieldVariation;
+    this._tensionEnd = PHYSICS_CONFIG.resistance.tensionEnd + variation * PHYSICS_CONFIG.resistance.tensionVariation;
+    this._intactCompressionStiffness = PHYSICS_CONFIG.spring.compression.intactActiveStiffness
+      * (1 + variation * PHYSICS_CONFIG.resistance.stiffnessVariation);
     this.setHoldDuration(holdSeconds);
     this.reset();
   }
@@ -159,35 +182,38 @@ export class BubbleState {
       ? this.active ? PHYSICS_CONFIG.activeCompression.poppedBase
         + PHYSICS_CONFIG.activeCompression.poppedForce * force : FILM_REST_COMPRESSION : this.active
       ? PHYSICS_CONFIG.activeCompression.intactBase
-        + PHYSICS_CONFIG.activeCompression.intactProgress * Math.pow(this.holdProgress,
-          PHYSICS_CONFIG.activeCompression.intactProgressExponent)
+        + PHYSICS_CONFIG.activeCompression.intactProgress
+          * resistanceProfile(this.holdProgress, this._yieldEnd, this._tensionEnd)
         + PHYSICS_CONFIG.activeCompression.intactForce * force : 0;
     const distance = Math.min(1, Math.hypot(this.x, this.y));
     const targetBulge = this.popped ? 0 : targetCompression * (PHYSICS_CONFIG.bulge.base
-      + distance * PHYSICS_CONFIG.bulge.distance);
+      + distance * PHYSICS_CONFIG.bulge.distance) * (1 + PHYSICS_CONFIG.bulge.tensionGain
+        * this.holdProgress * this.holdProgress);
+
+    // These coefficients cannot change during a frame's integration steps.
+    const positionStiffness = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveStiffness
+      : PHYSICS_CONFIG.spring.position.poppedIdleStiffness : this.active
+        ? PHYSICS_CONFIG.spring.position.intactActiveStiffness : PHYSICS_CONFIG.spring.position.intactIdleStiffness;
+    const positionDamping = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveDamping
+      : PHYSICS_CONFIG.spring.position.poppedIdleDamping : this.active
+        ? PHYSICS_CONFIG.spring.position.intactActiveDamping : PHYSICS_CONFIG.spring.position.intactIdleDamping;
+    const stiffness = this.popped ? PHYSICS_CONFIG.spring.compression.poppedStiffness : this.active
+      ? this._intactCompressionStiffness : PHYSICS_CONFIG.spring.compression.intactIdleStiffness;
+    // Slack plastic dissipates the poke instead of rebounding like an air
+    // pocket. Keep this response close to critically damped.
+    const damping = this.popped ? PHYSICS_CONFIG.spring.compression.poppedDamping : this.active
+      ? PHYSICS_CONFIG.spring.compression.intactActiveDamping : PHYSICS_CONFIG.spring.compression.intactIdleDamping;
 
     // Small integration steps keep the same damped spring behaviour at 30,
     // 60 and 120 Hz, without an external animation/physics dependency.
     const count = Math.ceil(delta / (1 / PHYSICS_CONFIG.integrationFrequency));
     const h = delta / count;
     for (let i = 0; i < count; i += 1) {
-      const positionStiffness = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveStiffness
-        : PHYSICS_CONFIG.spring.position.poppedIdleStiffness : this.active
-          ? PHYSICS_CONFIG.spring.position.intactActiveStiffness : PHYSICS_CONFIG.spring.position.intactIdleStiffness;
-      const positionDamping = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveDamping
-        : PHYSICS_CONFIG.spring.position.poppedIdleDamping : this.active
-          ? PHYSICS_CONFIG.spring.position.intactActiveDamping : PHYSICS_CONFIG.spring.position.intactIdleDamping;
       this._vx += ((this._targetX - this.x) * positionStiffness - this._vx * positionDamping) * h;
       this._vy += ((this._targetY - this.y) * positionStiffness - this._vy * positionDamping) * h;
       this.x += this._vx * h;
       this.y += this._vy * h;
 
-      const stiffness = this.popped ? PHYSICS_CONFIG.spring.compression.poppedStiffness : this.active
-        ? PHYSICS_CONFIG.spring.compression.intactActiveStiffness : PHYSICS_CONFIG.spring.compression.intactIdleStiffness;
-      // Slack plastic dissipates the poke instead of rebounding like an air
-      // pocket. Keep this response close to critically damped.
-      const damping = this.popped ? PHYSICS_CONFIG.spring.compression.poppedDamping : this.active
-        ? PHYSICS_CONFIG.spring.compression.intactActiveDamping : PHYSICS_CONFIG.spring.compression.intactIdleDamping;
       this._compressionVelocity += ((targetCompression - this.compression) * stiffness -
         this._compressionVelocity * damping) * h;
       this.compression += this._compressionVelocity * h;

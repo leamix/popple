@@ -67,8 +67,9 @@ export const PHYSICS_CONFIG = freeze({
   defaultPressure: 0.5,
   pressure: freeze({ minimumEvidence: 0.02, maximumEvidence: 0.98, minimumVariation: 0.075, forceFloor: 0.35 }),
   initialContact: freeze({ intactCompression: 0.16, poppedCompression: 0.085, intactBulge: 0.035 }),
-  activeCompression: freeze({ poppedBase: 0.12, poppedForce: 0.07, intactBase: 0.25, intactProgress: 0.53, intactProgressExponent: 0.85, intactForce: 0.05 }),
-  bulge: freeze({ base: 0.20, distance: 0.36, maximum: 0.6 }),
+  activeCompression: freeze({ poppedBase: 0.12, poppedForce: 0.07, intactBase: 0.25, intactProgress: 0.53, intactForce: 0.05 }),
+  resistance: freeze({ yieldEnd: 0.28, yieldCompression: 0.40, tensionEnd: 0.56, tensionCompression: 0.50, yieldVariation: 0.016, tensionVariation: 0.036, stiffnessVariation: 0.06 }),
+  bulge: freeze({ base: 0.20, distance: 0.36, tensionGain: 0.16, maximum: 0.6 }),
   collapse: freeze({ decay: 16, frequency: 26 }),
   integrationFrequency: 180,
   spring: freeze({
