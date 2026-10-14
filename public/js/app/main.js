@@ -30,6 +30,7 @@ let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
 let dark=storage.get('theme','dark')==='dark';
 let diameter=Math.min(100,Math.max(64,Number(storage.get('size','84'))||84));
 let layout=[],renderer,frame=0,lastTime=0,animateUntil=0,renderDirty=true,contextLost=false;
+let poppedCount=0;
 let light={x:0,y:0,angle:0}, lightTarget={x:0,y:0,angle:0};
 let tiltWanted=storage.get('tilt','true')==='true',tiltStatus='idle';
 const deviceLighting=new DeviceLighting({
@@ -84,8 +85,8 @@ function tick(ms) {
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
       buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул. Можно помять плёнку`);
-      const count=bubbles.filter(b=>b.popped).length;
-      $('#announcement').textContent=`Хлоп! ${count} из ${bubbles.length} пузырьков лопнули.`;
+      poppedCount+=1;
+      $('#announcement').textContent=`Хлоп! ${poppedCount} из ${bubbles.length} пузырьков лопнули.`;
       animateUntil=now+APP_CONFIG.popWakeSeconds;
       pulse(APP_CONFIG.hapticPopMilliseconds);
     }
@@ -147,7 +148,9 @@ function coordinates(event,index) {
 function hitBubble(event) {
   const rect=playground.getBoundingClientRect();
   const x=event.clientX-rect.left,y=event.clientY-rect.top;
-  return layout.findIndex(p=>Math.hypot(x-p.x,y-p.y)<=p.radius);
+  if(renderer?.layout===layout)return renderer.sheetState.hitIndex(x,y);
+  // Before the first post-resize frame the new geometry has no hash yet.
+  return layout.findIndex(p=>(x-p.x)*(x-p.x)+(y-p.y)*(y-p.y)<=p.radius*p.radius);
 }
 function releasePointer(pointerId) {
   const contact=pointers.get(pointerId);if(!contact)return;
@@ -261,6 +264,7 @@ document.addEventListener('dragstart',event=>event.preventDefault());
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
 $('#reset').addEventListener('click',()=>{
   audio.unlock();cancelAll();effects.clear();
+  poppedCount=0;
   bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
   hapticTargets.forEach(input=>{input.checked=false;});
   buttons.forEach((button,i)=>{button.dataset.popped='false';button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
@@ -340,6 +344,7 @@ $('#tilt-permission').addEventListener('click',()=>deviceLighting.enable({userGe
 $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
+  if(renderer)renderer.reducedMotion=reduced;
   hapticTargets.forEach(input=>{input.disabled=reduced;});
   light=lightTarget={x:0,y:0,angle:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }

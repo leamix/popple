@@ -1,7 +1,7 @@
 // Analytic elastic membrane. Surface slopes drive the reflected studio lights;
 // the same height field provides the finger dent and the collapsed creases.
 import { makeMembrane } from '../core/membrane.js';
-import { BUBBLE_COUNT } from '../core/layout.js';
+import { MAX_SHEET_SITES, SheetState } from '../core/sheet.js';
 const vertex = `
 attribute vec2 a_position;
 varying vec2 v_uv;
@@ -10,10 +10,13 @@ void main() { v_uv = a_position; gl_Position = vec4(a_position,0.,1.); }
 const fragment = `
 precision highp float;
 varying vec2 v_uv;
-uniform float u_seed, u_compression, u_collapse, u_dark, u_time, u_bulge, u_sheet, u_light_angle;
+uniform float u_seed, u_compression, u_collapse, u_dark, u_time, u_bulge, u_light_angle;
 uniform vec2 u_touch, u_light, u_resolution, u_origin;
 uniform float u_radius;
-uniform vec4 u_sites[${BUBBLE_COUNT}];
+// A tile only sees local pockets; shader size never depends on sheet count.
+uniform vec4 u_sites[${MAX_SHEET_SITES}], u_links[${MAX_SHEET_SITES}];
+uniform int u_site_count;
+uniform vec4 u_link;
 uniform vec4 u_folds[5], u_foldProfile[5], u_pockets[3], u_dent;
 uniform float u_air;
 const float PI = 3.14159265359;
@@ -56,6 +59,9 @@ float heightAt(vec2 p) {
   float opposite=exp(-dot(q+u_touch*.55,q+u_touch*.55)/.28);
   dome += u_compression*(-.53*dent+.07*opposite)*edge;
   dome += u_bulge*.22*opposite*edge;
+  // Neighbour tension tilts a small patch of the cap without depressing it
+  // like a second finger or changing the original pocket's hold state.
+  dome += dot(q,u_link.xy*vec2(1.,-1.))*.11*edge;
   // Fine, taut stretch marks are confined to the heat-sealed shoulder.
   dome += .003*sin(a*31.+3.*sin(a*7.+u_seed)+r*15.+u_seed)*smoothstep(.88,.97,r)*edge;
   dome += .0005*sin(q.x*24.+q.y*11.+u_seed)*sin(q.y*19.-q.x*5.)*edge;
@@ -210,16 +216,24 @@ void drawSheet() {
   slope+=k4*.006*cos(dot(p,k4)+.65*sin(dot(p,k2)));
   float exposed=1.,contact=0.,castShadow=0.,bounce=0.,nearFilm=0.,pool=0.,poolShade=0.;
   vec2 exitDirection=-keyDirection();
-  for(int i=0;i<${BUBBLE_COUNT};i++) {
-    vec2 q=(pixel-u_sites[i].xy)*vec2(1.,-1.)/u_sites[i].z;
-    float distance=length(q), c=u_sites[i].w;
+  for(int i=0;i<${MAX_SHEET_SITES};i++) {
+    if(i>=u_site_count) break;
+    vec4 link=u_links[i];
+    vec2 q=((pixel-u_sites[i].xy)/u_sites[i].z-link.xy)*vec2(1.,-1.);
+    float distance=length(q), c=link.w;
+    if(distance>=3.) continue;
     vec2 direction=q/max(distance,.0001);
     float gutter=exp(-sq((distance-1.085)/.055));
     float shoulder=exp(-sq((distance-1.18)/.20));
     nearFilm=max(nearFilm,exp(-sq((distance-1.15)/.55)));
-    float irregular=.65+.35*sin(angleOf(q)*3.+float(i)*2.3);
+    float irregular=.65+.35*sin(angleOf(q)*3.+u_sites[i].w*2.3);
     // Raised welds and sagging bridges share the same light as the domes.
     slope+=direction*shoulder*.18*irregular;
+    // The contact pulls the welded shoulder and adjoining bridges. The same
+    // local field relights neighbours; rupture adds one small settling pulse.
+    float bridge=exp(-sq((distance-1.30)/.42));
+    slope+=direction*bridge*link.z*.085;
+    slope+=link.xy*vec2(1.,-1.)*bridge*1.4;
     contact=max(contact,gutter*(.65+.35*max(0.,-direction.y)));
     vec2 shadowOffset=turn(vec2(.065,-.10),u_light_angle);
     float shadowDistance=length(q-shadowOffset);
@@ -227,7 +241,7 @@ void drawSheet() {
     castShadow=max(castShadow,exp(-sq((shadowDistance-1.07)/.14))*shadowSide*(1.-c*.52));
     bounce=max(bounce,shoulder*pow(max(0.,dot(direction,exitDirection)),5.)*irregular);
     if(distance<3.) {
-      vec2 transmitted=transmittedPool(q,exitDirection,c,float(i));
+      vec2 transmitted=transmittedPool(q,exitDirection,c,u_sites[i].w);
       // Overlapping patches stay local instead of adding an opaque white haze.
       pool=max(pool,transmitted.x);poolShade=max(poolShade,transmitted.y);
     }
@@ -257,8 +271,10 @@ void drawSheet() {
   gl_FragColor=vec4(min(premul,vec3(alpha)),alpha);
 }
 void main() {
-  if(u_sheet>.5) { drawSheet(); return; }
-  vec2 p=v_uv*1.38;
+#ifdef SHEET_PASS
+  drawSheet();
+#else
+  vec2 p=v_uv*1.38-u_link.xy*vec2(1.,-1.);
   vec2 q=shape(p); float r=length(q);
   vec2 direction=q/max(r,.00001);
   if(r>1.30) discard;
@@ -340,6 +356,7 @@ void main() {
   float transmissionLight=mix(.79+shade*.25,.92+shade*.08,u_dark);
   vec3 premul=spec+bg*coat*(1.-specMax)*transmissionLight;
   gl_FragColor=vec4(min(premul,vec3(alpha)),alpha);
+#endif
 }
 `;
 
@@ -357,54 +374,108 @@ export class FilmRenderer {
       if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader));
       return shader;
     };
-    const vs=compile(gl.VERTEX_SHADER,vertex), fs=compile(gl.FRAGMENT_SHADER,fragment);
-    this.program=gl.createProgram();gl.attachShader(this.program,vs);gl.attachShader(this.program,fs);gl.linkProgram(this.program);
-    gl.deleteShader(vs);gl.deleteShader(fs);
-    if(!gl.getProgramParameter(this.program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(this.program));
+    const vs=compile(gl.VERTEX_SHADER,vertex);
+    const makeProgram=source=>{
+      const fs=compile(gl.FRAGMENT_SHADER,source),program=gl.createProgram();
+      gl.attachShader(program,vs);gl.attachShader(program,fs);
+      gl.bindAttribLocation(program,0,'a_position');gl.linkProgram(program);gl.deleteShader(fs);
+      if(!gl.getProgramParameter(program,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program));
+      return program;
+    };
+    // Distinct entry points let the linker discard cap folds from the sheet
+    // program and site lists from caps. Each stays within 64 uniform vectors.
+    this.program=makeProgram(fragment);
+    this.sheetProgram=makeProgram('#define SHEET_PASS\n'+fragment);
+    gl.deleteShader(vs);
     gl.useProgram(this.program);
     const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
     gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
     const a=gl.getAttribLocation(this.program,'a_position');gl.enableVertexAttribArray(a);gl.vertexAttribPointer(a,2,gl.FLOAT,false,0,0);
-    this.uniforms={};
-    for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','sheet','resolution','origin','radius']) this.uniforms[name]=gl.getUniformLocation(this.program,'u_'+name);
-    for(const name of ['folds','foldProfile','pockets']) this.uniforms[name]=gl.getUniformLocation(this.program,'u_'+name+'[0]');
-    this.uniforms.sites=gl.getUniformLocation(this.program,'u_sites[0]');
-    this.sites=new Float32Array(BUBBLE_COUNT*4);
+    const uniforms=program=>{
+      const locations={};
+      for(const name of ['seed','compression','collapse','dark','time','bulge','touch','light','light_angle','air','dent','resolution','origin','radius','site_count','link']) locations[name]=gl.getUniformLocation(program,'u_'+name);
+      for(const name of ['folds','foldProfile','pockets','sites','links']) locations[name]=gl.getUniformLocation(program,'u_'+name+'[0]');
+      return locations;
+    };
+    this.uniforms=uniforms(this.program);
+    this.sheetUniforms=uniforms(this.sheetProgram);
+    this.sites=new Float32Array(MAX_SHEET_SITES*4);
+    this.links=new Float32Array(MAX_SHEET_SITES*4);
+    this.sheetState=new SheetState();
+    this.layout=null;
     this.membranes=[];
     gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0,0,0,0);
   }
   resize(width,height,dpr) {
     this.width=width;this.height=height;this.dpr=dpr;
+    this.layout=null;
     this.canvas.width=Math.round(width*dpr);this.canvas.height=Math.round(height*dpr);
   }
   render(bubbles,layout,dark,time,light) {
-    const gl=this.gl,u=this.uniforms;
-    gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.program);
+    const gl=this.gl,s=this.sheetUniforms,u=this.uniforms;
+    if(this.layout!==layout) {
+      this.layout=layout;
+      this.sheetState.resize(layout,this.width,this.height);
+    }
+    this.sheetState.update(bubbles,this.reducedMotion);
+    const deformation=this.sheetState.deformation;
+    gl.disable(gl.SCISSOR_TEST);
+    gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(this.sheetProgram);
+    gl.uniform1f(s.dark,dark?1:0);
+    gl.uniform2f(s.light,light.x,light.y);
+    gl.uniform1f(s.light_angle,Number.isFinite(light.angle)?light.angle:0);
+    gl.uniform2f(s.resolution,this.width,this.height);
+    gl.uniform1f(s.radius,layout[0].radius);
+    gl.uniform1f(s.seed,.417);
+    gl.viewport(0,0,this.canvas.width,this.canvas.height);
+    gl.enable(gl.SCISSOR_TEST);
+    for(const tile of this.sheetState.tiles) {
+      const indices=tile.indices;
+      for(let j=0;j<indices.length;j++) {
+        const i=indices[j],pos=layout[i],offset=j*4,source=i*4;
+        this.sites[offset]=pos.x;this.sites[offset+1]=pos.y;
+        this.sites[offset+2]=pos.radius;this.sites[offset+3]=i;
+        this.links[offset]=deformation[source];this.links[offset+1]=deformation[source+1];
+        // Pack pulse into the slope strength; keep identity and collapse in
+        // existing vec4 lanes rather than another device-limited uniform array.
+        this.links[offset+2]=deformation[source+2]+deformation[source+3]*(.16/.085);
+        this.links[offset+3]=bubbles[i].collapse;
+      }
+      gl.uniform1i(s.site_count,indices.length);
+      gl.uniform4fv(s.sites,this.sites);gl.uniform4fv(s.links,this.links);
+      // Shared rounded endpoints partition framebuffer pixels exactly, even
+      // at fractional DPR. All tiles keep one viewport and absolute lighting.
+      const left=Math.round(tile.x*this.dpr),right=Math.round((tile.x+tile.width)*this.dpr);
+      const bottom=Math.round((this.height-tile.y-tile.height)*this.dpr);
+      const top=Math.round((this.height-tile.y)*this.dpr);
+      gl.scissor(left,bottom,right-left,top-bottom);
+      gl.drawArrays(gl.TRIANGLES,0,6);
+    }
+    gl.disable(gl.SCISSOR_TEST);
+    gl.useProgram(this.program);
     gl.uniform1f(u.dark,dark?1:0);gl.uniform1f(u.time,time);
     gl.uniform2f(u.light,light.x,light.y);
     gl.uniform1f(u.light_angle,Number.isFinite(light.angle)?light.angle:0);
-    gl.uniform2f(u.resolution,this.width,this.height);
-    for(let i=0;i<layout.length;i++) this.sites.set([layout[i].x,layout[i].y,layout[i].radius,bubbles[i].collapse],i*4);
-    gl.uniform4fv(u.sites,this.sites);
-    gl.uniform1f(u.radius,layout[0].radius);
-    gl.uniform1f(u.seed,.417);
-    gl.uniform1f(u.sheet,1);
-    gl.viewport(0,0,this.canvas.width,this.canvas.height);
-    gl.drawArrays(gl.TRIANGLES,0,6);
-    gl.uniform1f(u.sheet,0);
     for(let i=0;i<bubbles.length;i++) {
       const b=bubbles[i], pos=layout[i], extent=pos.radius*1.38;
+      if(pos.x+extent<0||pos.y+extent<0||pos.x-extent>this.width||pos.y-extent>this.height) continue;
       gl.viewport(Math.round((pos.x-extent)*this.dpr),Math.round((this.height-pos.y-extent)*this.dpr),Math.round(extent*2*this.dpr),Math.round(extent*2*this.dpr));
       gl.uniform1f(u.seed,b.seed);gl.uniform1f(u.compression,b.compression);gl.uniform1f(u.collapse,b.collapse);gl.uniform1f(u.bulge,b.bulge);
       gl.uniform2f(u.origin,pos.x,pos.y);gl.uniform1f(u.radius,pos.radius);
-      let membrane=this.membranes[i];
-      const popX=b.popped?b.popX:0, popY=b.popped?-b.popY:0;
-      if(!membrane||membrane.seed!==b.seed||membrane.popX!==popX||membrane.popY!==popY) {
-        membrane=this.membranes[i]=makeMembrane(b.seed,popX,popY);
+      const offset=i*4;
+      gl.uniform4f(u.link,deformation[offset],deformation[offset+1],deformation[offset+2],deformation[offset+3]);
+      // Intact caps never sample collapsed folds; avoid building/uploading
+      // their permanent wrinkle data until the first rupture.
+      if(b.popped) {
+        let membrane=this.membranes[i];
+        const popX=b.popX,popY=-b.popY;
+        if(!membrane||membrane.seed!==b.seed||membrane.popX!==popX||membrane.popY!==popY) {
+          membrane=this.membranes[i]=makeMembrane(b.seed,popX,popY);
+        }
+        gl.uniform1f(u.air,membrane.air);gl.uniform4fv(u.dent,membrane.dent);
+        gl.uniform4fv(u.folds,membrane.folds);gl.uniform4fv(u.foldProfile,membrane.profiles);gl.uniform4fv(u.pockets,membrane.pockets);
       }
-      gl.uniform1f(u.air,membrane.air);gl.uniform4fv(u.dent,membrane.dent);
-      gl.uniform4fv(u.folds,membrane.folds);gl.uniform4fv(u.foldProfile,membrane.profiles);gl.uniform4fv(u.pockets,membrane.pockets);
       gl.uniform2f(u.touch,b.x,-b.y);
       gl.drawArrays(gl.TRIANGLES,0,6);
     }

@@ -56,6 +56,19 @@ export const LAYOUT_CONFIG = freeze({
   defaultBubbleDiameter: 84,
 });
 
+export const SHEET_CONFIG = freeze({
+  maximumShaderSites: 24,
+  supportRadius: 3.05,
+  neighbourRadius: 2.7,
+  maximumOffset: 0.035,
+  tileRadiusFactor: 4,
+  popPulseSeconds: 0.28,
+  strain: freeze({ compression: 0.7, bulge: 0.8 }),
+  pull: freeze({ compression: 0.024, bulge: 0.02, pulse: 0.007 }),
+  coupling: freeze({ distanceGain: 4, strain: 0.15, pulseTension: 0.04 }),
+  pulse: freeze({ frequency: 32, decay: 16, self: 0.08, neighbour: 0.035, maximum: 0.14 }),
+});
+
 export const PHYSICS_CONFIG = freeze({
   defaultHoldSeconds: 0.3,
   minimumHoldSeconds: 0.2,

@@ -244,6 +244,65 @@ try {
     await screenshot(page, 'desktop-dark.png');
     return { fieldPadding, ...await inspectStaggeredLayout(page) };
   });
+  await check('sheet and cap programs keep separate uniforms within a 64-vector WebGL budget', async () => {
+    const details=await page.evaluate(()=>{
+      const renderer=__filmRenderer,gl=renderer.gl;
+      const vectors=program=>{
+        let total=0;
+        for(let i=0;i<gl.getProgramParameter(program,gl.ACTIVE_UNIFORMS);i++) total+=gl.getActiveUniform(program,i).size;
+        return total;
+      };
+      return {sheetVectors:vectors(renderer.sheetProgram),capVectors:vectors(renderer.program),
+        sheetIgnoresFolds:gl.getUniformLocation(renderer.sheetProgram,'u_folds[0]')===null,
+        capIgnoresSites:gl.getUniformLocation(renderer.program,'u_sites[0]')===null,error:gl.getError()};
+    });
+    assert.ok(details.sheetVectors<=64&&details.capVectors<=64);
+    assert.equal(details.sheetIgnoresFolds,true);assert.equal(details.capIgnoresSites,true);
+    assert.equal(details.error,0);
+    return details;
+  });
+  await check('local strain relights neighbours and tiled sheet matches a full pass at fractional DPR', async () => {
+    const results=[];
+    for(const dpr of [1.25,2.5]) {
+      const {ctx:probeContext,page:probe}=await context({viewport:{width:390,height:844},deviceScaleFactor:dpr});
+      try {
+        const details=await probe.evaluate(()=>{
+        const renderer=__filmRenderer,states=__bubbleStates,layout=__filmLayout;
+        states[4].setHoldDuration(2);states[4].press(.5,-.3);
+        for(let i=0;i<4;i++)states[4].step(1/60);
+        const draw=dark=>renderer.render(states,layout,dark,__filmTime,{x:0,y:0,angle:0});
+        const read=()=>{
+          const pixels=new Uint8Array(renderer.canvas.width*renderer.canvas.height*4);
+          renderer.gl.readPixels(0,0,renderer.canvas.width,renderer.canvas.height,renderer.gl.RGBA,renderer.gl.UNSIGNED_BYTE,pixels);
+          return pixels;
+        };
+        draw(true);
+        const sheet=renderer.sheetState,neighbours=Array.from(sheet.neighbours[4]);
+        const responding=neighbours.filter(i=>Math.hypot(sheet.deformation[i*4],sheet.deformation[i*4+1])>0);
+        const untouched=states.every((b,i)=>i===4||(!b.active&&!b.popped&&b.compression===0));
+        const tiles=sheet.tiles,comparisons=[];
+        for(const dark of [true,false]) {
+          draw(dark);const tiled=read();
+          sheet.tiles=[{x:0,y:0,width:renderer.width,height:renderer.height,indices:Uint32Array.from(layout.map((_,i)=>i))}];
+          draw(dark);const reference=read();sheet.tiles=tiles;
+          let maximumDifference=0,changedChannels=0;
+          for(let i=0;i<tiled.length;i++) {
+            const difference=Math.abs(tiled[i]-reference[i]);
+            maximumDifference=Math.max(maximumDifference,difference);
+            if(difference>0)changedChannels++;
+          }
+          comparisons.push({dark,maximumDifference,changedChannels});
+        }
+        return {dpr:renderer.dpr,neighbours:neighbours.length,responding:responding.length,untouched,comparisons,error:renderer.gl.getError()};
+      });
+        assert.ok(details.neighbours>0);assert.equal(details.responding,details.neighbours);
+        assert.equal(details.untouched,true);assert.equal(details.error,0);
+        for(const comparison of details.comparisons)assert.ok(comparison.maximumDifference<=2,`Tile seam differs by ${comparison.maximumDifference} levels`);
+        results.push(details);
+      } finally { await probeContext.close(); }
+    }
+    return results;
+  });
   await check('film keeps progress announcements for assistive technology without visual status copy', async () => {
     assert.equal(await page.locator('.below-film').count(), 0);
     assert.equal(await page.locator('#announcement').getAttribute('aria-live'), 'polite');
