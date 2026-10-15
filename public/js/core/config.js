@@ -84,6 +84,7 @@ export const PHYSICS_CONFIG = freeze({
   resistance: freeze({ yieldEnd: 0.28, yieldCompression: 0.40, tensionEnd: 0.56, tensionCompression: 0.50, yieldVariation: 0.016, tensionVariation: 0.036, stiffnessVariation: 0.06 }),
   bulge: freeze({ base: 0.20, distance: 0.36, tensionGain: 0.16, maximum: 0.6 }),
   collapse: freeze({ decay: 16, frequency: 26 }),
+  refill: freeze({ minimumSeconds: 1.5, secondsRange: 0.5, durationRatio: 0.58, durationRatioRange: 0.10, gapWeight: 0.6, gapWeightRange: 0.8 }),
   integrationFrequency: 180,
   spring: freeze({
     position: freeze({ poppedActiveStiffness: 390, poppedIdleStiffness: 165, intactActiveStiffness: 650, intactIdleStiffness: 205, poppedActiveDamping: 42, poppedIdleDamping: 29, intactActiveDamping: 36, intactIdleDamping: 21 }),

@@ -1,4 +1,4 @@
-import { BubbleState, DEFAULT_HOLD_SECONDS } from '../core/physics.js';
+import { BubbleState, DEFAULT_HOLD_SECONDS, refillBubbles } from '../core/physics.js';
 import { FilmRenderer } from '../rendering/renderer.js';
 import { PopAudio, BurstLayer } from '../audio/effects.js';
 import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
@@ -56,7 +56,7 @@ const hapticTargets=nativeHaptics?buttons.map((_,i)=>{
   input.type='checkbox';input.setAttribute('switch','');input.className='bubble-haptic';
   input.tabIndex=-1;input.setAttribute('aria-hidden','true');input.dataset.index=i;
   input.addEventListener('click',event=>{
-    if(reduced||hitBubble(event)!==i){event.preventDefault();return;}
+    if(reduced||bubbles[i].refilling||hitBubble(event)!==i){event.preventDefault();return;}
     if(event.isTrusted)buttons[i].focus({preventScroll:true});
   });
   $('#targets').append(input);return input;
@@ -72,13 +72,27 @@ function wake(seconds=APP_CONFIG.wakeSeconds) {
   animateUntil=Math.max(animateUntil,performance.now()/1000+seconds);
   if(!frame&&!document.hidden&&!contextLost) {lastTime=performance.now()/1000;frame=requestAnimationFrame(tick);}
 }
+function updateBubbleButton(index) {
+  const bubble=bubbles[index],button=buttons[index];
+  button.dataset.popped=String(bubble.popped);
+  if(bubble.refilling) {
+    button.setAttribute('aria-busy','true');button.setAttribute('aria-disabled','true');
+  } else {
+    button.removeAttribute('aria-busy');button.removeAttribute('aria-disabled');
+  }
+  button.setAttribute('aria-label',bubble.refilling?`Пузырёк ${index+1} надувается`:
+    bubble.popped?`Пузырёк ${index+1} лопнул. Можно помять плёнку`:
+      `Пузырёк ${index+1}. Удерживай, чтобы лопнуть`);
+  if(hapticTargets[index])hapticTargets[index].disabled=reduced||bubble.refilling;
+}
 function tick(ms) {
   frame=0;
   if(document.hidden||contextLost) return;
-  const now=ms/1000,dt=Math.min(.1,Math.max(0,now-lastTime));lastTime=now;
+  const now=ms/1000,dt=Math.max(0,now-lastTime);lastTime=now;
   let active=false;
   for(let i=0;i<bubbles.length;i++) {
     const b=bubbles[i];
+    const wasRefilling=b.refilling;
     if(b.step(dt,now)) {
       const p=layout[i];
       audio.pop();
@@ -90,7 +104,11 @@ function tick(ms) {
       animateUntil=now+APP_CONFIG.popWakeSeconds;
       pulse(APP_CONFIG.hapticPopMilliseconds);
     }
-    active ||= b.active;
+    if(wasRefilling&&!b.refilling) {
+      poppedCount-=1;updateBubbleButton(i);renderDirty=true;
+      if(!bubbles.some(bubble=>bubble.refilling))$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
+    }
+    active ||= b.active||b.refilling;
   }
   const ease=1-Math.exp(-dt*8);
   light.x+=(lightTarget.x-light.x)*ease;light.y+=(lightTarget.y-light.y)*ease;
@@ -208,7 +226,7 @@ buttons.forEach((button,i)=>{
   // Assistive-technology activation has no physical key/pointer hold.
   button.addEventListener('click',event=>{
     if(event.detail===0&&!bubbles[i].active){
-      audio.unlock();bubbles[i].press(0,0,.5,performance.now()/1000);wake();
+      audio.unlock();if(!bubbles[i].press(0,0,.5,performance.now()/1000))return;wake();
       const timer=setTimeout(()=>{
         if(activationTimers.get(i)!==timer)return;
         bubbles[i].release();activationTimers.delete(i);wake();
@@ -264,12 +282,12 @@ document.addEventListener('dragstart',event=>event.preventDefault());
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
 $('#reset').addEventListener('click',()=>{
   audio.unlock();cancelAll();effects.clear();
-  poppedCount=0;
-  bubbles.forEach(b=>{b.reset();b.seed=Math.random();});
+  refillBubbles(bubbles,{reduced});
+  poppedCount=bubbles.filter(b=>b.popped).length;
   hapticTargets.forEach(input=>{input.checked=false;});
-  buttons.forEach((button,i)=>{button.dataset.popped='false';button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);});
+  buttons.forEach((_,i)=>updateBubbleButton(i));
   advanceBrandAccent();
-  $('#announcement').textContent=`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
+  $('#announcement').textContent=bubbles.some(b=>b.refilling)?'Пузырьки надуваются.':`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 });
 audio.setEnabled(storage.get('sound','true')==='true');
 function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
@@ -345,7 +363,11 @@ $('#motion').checked=reduced;
 function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
   if(renderer)renderer.reducedMotion=reduced;
-  hapticTargets.forEach(input=>{input.disabled=reduced;});
+  const wasRefilling=bubbles.some(b=>b.refilling);
+  if(reduced)for(const bubble of bubbles)if(bubble.refilling)bubble.reset();
+  if(reduced&&wasRefilling)$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
+  poppedCount=bubbles.filter(b=>b.popped).length;
+  buttons.forEach((_,i)=>updateBubbleButton(i));
   light=lightTarget={x:0,y:0,angle:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});

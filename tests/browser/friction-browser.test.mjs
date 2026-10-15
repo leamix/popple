@@ -152,6 +152,84 @@ async function soundScenario(targetBrowser = browser) {
 }
 let webkitBrowser;
 try {
+  await check('refill overlaps random starts, preserves intact pockets and survives repeated clicks', async () => {
+    const { page } = await context({ viewport: { width: 1000, height: 800 } });
+    await page.locator('.bubble-target').evaluateAll(buttons => buttons.slice(1).forEach(button => button.click()));
+    await page.waitForFunction(() => __bubbleStates.slice(1).every(b => b.popped));
+    await page.waitForTimeout(450);
+    const intact = await page.evaluate(() => ({ seed: __bubbleStates[0].seed, collapse: __bubbleStates[0].collapse }));
+    await page.screenshot({ path: path.join(output, 'refill-before.png') });
+    await page.evaluate(() => {
+      window.__refillSamples = [];
+      document.querySelector('#reset').addEventListener('click', () => {
+        if (__refillSamples.length) return;
+        const start = performance.now();
+        const sample = () => {
+          const states = __bubbleStates.map(b => ({ collapse: b.collapse, refilling: b.refilling, popped: b.popped, seed: b.seed }));
+          __refillSamples.push({ time: (performance.now() - start) / 1000, states });
+          if (states.some(b => b.refilling)) requestAnimationFrame(sample);
+        };
+        sample();
+      });
+    });
+    await page.locator('#reset').click();
+    await page.waitForTimeout(320);
+    assert.ok(await page.locator('[aria-busy="true"]').count() > 0, 'refill must remain visible after the click');
+    const progress = await page.evaluate(() => __bubbleStates.map(b => b.collapse));
+    await page.locator('#reset').click();
+    assert.ok(await page.evaluate(previous => __bubbleStates.every((b, i) => b.collapse <= previous[i]), progress),
+      'a repeated click must not rewind any pocket');
+    await page.screenshot({ path: path.join(output, 'refill-inflating.png') });
+    await page.waitForFunction(() => __bubbleStates.every(b => !b.refilling && !b.popped));
+    await page.screenshot({ path: path.join(output, 'refill-after.png') });
+    assert.equal(await page.locator('[aria-busy="true"]').count(), 0);
+    assert.equal(await page.locator('[aria-disabled="true"]').count(), 0);
+    const samples = await page.evaluate(() => __refillSamples);
+    assert.ok(samples.at(-1).time >= 1.5 && samples.at(-1).time < 2.25,
+      `whole refill took ${samples.at(-1).time}s, including frame delivery`);
+    const starts = Array.from({ length: 13 }, (_, i) => samples.find(sample => sample.states[i + 1].collapse < .99).time).sort((a, b) => a - b);
+    const firstFinish = samples.find(sample => sample.states.slice(1).some(b => !b.refilling)).time;
+    assert.ok(starts.at(-1) - starts[0] > .2);
+    assert.ok(starts.at(-1) < firstFinish, 'later pockets start before the first completes');
+    assert.ok(samples.every(sample => sample.states[0].seed === intact.seed && sample.states[0].collapse === intact.collapse));
+    const a = await pocket(page, 4);
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await waitPopped(page, 4); await page.mouse.up();
+    assert.deepEqual(await popped(page), [4], 'restored bubbles remain playable');
+    return { seconds: samples.at(-1).time, starts, firstFinish };
+  });
+  await check('refill in reduced motion is immediate and toggling it finishes an animation', async () => {
+    const { page } = await context();
+    const popOne = async () => {
+      await page.locator('.bubble-target').nth(4).evaluate(button => button.click());
+      await waitPopped(page, 4);
+    };
+    await popOne();
+    await page.locator('#reset').click();
+    await page.locator('#settings-open').click(); await page.locator('#motion').check();
+    assert.deepEqual(await popped(page), []);
+    assert.ok(await page.evaluate(() => __bubbleStates.every(b => !b.refilling)));
+    await page.locator('#settings-close').click();
+    await popOne();
+    await page.locator('#reset').click();
+    assert.deepEqual(await popped(page), []);
+    assert.equal(await page.locator('[aria-busy="true"]').count(), 0);
+    assert.ok(!(await page.locator('#announcement').textContent()).includes('надуваются'));
+  });
+  await check('refill ignores late assistive clicks without cancelling the next keyboard hold', async () => {
+    const { page } = await context();
+    const button = page.locator('.bubble-target').nth(4);
+    await button.evaluate(button => button.click()); await waitPopped(page, 4);
+    await page.locator('#reset').click();
+    await page.waitForFunction(() => {
+      const b = __bubbleStates[4];
+      return b.refilling && b._refillDuration - b._refillElapsed < .08;
+    });
+    await button.evaluate(button => button.click());
+    await page.waitForFunction(() => !__bubbleStates[4].refilling);
+    await button.focus(); await page.keyboard.down('Space');
+    await waitPopped(page, 4); await page.keyboard.up('Space');
+    assert.deepEqual(await popped(page), [4]);
+  });
   await check('intact and popped rubbing are silent while pop remains audible', () => soundScenario());
   await check('background and outside-circle retargeted presses do not pop or vibrate', async () => {
     const { page } = await context();

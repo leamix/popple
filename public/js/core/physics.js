@@ -36,6 +36,35 @@ function resistanceProfile(progress, yieldEnd, tensionEnd) {
   return profile.tensionCompression + (1 - profile.tensionCompression) * phase * phase;
 }
 
+/** Random, overlapping starts with a fixed deadline for the whole sheet. */
+export function refillBubbles(bubbles, { reduced = false, random = Math.random } = {}) {
+  const pending = bubbles.filter(bubble => bubble.popped && !bubble.refilling);
+  if (reduced) {
+    for (const bubble of bubbles) if (bubble.popped || bubble.refilling) bubble.reset();
+    return 0;
+  }
+  const remaining = bubbles.reduce((longest, bubble) => bubble.refilling
+    ? Math.max(longest, bubble._refillDuration - bubble._refillElapsed) : longest, 0);
+  if (!pending.length) return remaining;
+  const config = PHYSICS_CONFIG.refill;
+  const total = config.minimumSeconds + random() * config.secondsRange;
+  // Longer than half the total: even the last start overlaps the first pocket.
+  const duration = pending.length === 1 ? total
+    : total * (config.durationRatio + random() * config.durationRatioRange);
+  for (let i = pending.length - 1; i > 0; i--) {
+    const other = Math.floor(random() * (i + 1));
+    [pending[i], pending[other]] = [pending[other], pending[i]];
+  }
+  const gaps = Array.from({ length: pending.length - 1 }, () => config.gapWeight + random() * config.gapWeightRange);
+  const weight = gaps.reduce((sum, gap) => sum + gap, 0);
+  let offset = 0;
+  for (let i = 0; i < pending.length; i++) {
+    pending[i].startRefill(weight ? offset / weight * (total - duration) : 0, duration);
+    offset += gaps[i] ?? 0;
+  }
+  return Math.max(total, remaining);
+}
+
 /**
  * One sealed air pocket. All positions are relative to its centre, in [-1, 1].
  * The renderer places the extra bulge opposite (x, y), and derives normals from
@@ -86,10 +115,27 @@ export class BubbleState {
     this._maxPressure = PHYSICS_CONFIG.defaultPressure;
     this._pressureVaries = false;
     this._pressStartedAt = 0;
+    this.refilling = false;
+    this._refillElapsed = this._refillDuration = 0;
+  }
+
+  startRefill(delay, duration) {
+    if (!this.popped || this.refilling) return false;
+    this.release();
+    this.refilling = true;
+    this._refillElapsed = -delay;
+    this._refillDuration = duration;
+    // Keep the same creases and seed while the slack film regains its dome.
+    this._refillCollapse = this.collapse;
+    this._refillCompression = this.compression;
+    this._refillBulge = this.bulge;
+    this._refillX = this.x;
+    this._refillY = this.y;
+    return true;
   }
 
   press(x, y, pressure = PHYSICS_CONFIG.defaultPressure, timeSeconds = 0) {
-    if (this.active) return false;
+    if (this.active || this.refilling) return false;
     this.active = true;
     this.x = this._targetX = position(x);
     this.y = this._targetY = position(y);
@@ -140,6 +186,21 @@ export class BubbleState {
     const delta = clamp(finite(dt), 0, MAX_FRAME_SECONDS);
     const elapsed = clamp(finite(dt), 0, MAX_HOLD_FRAME_SECONDS);
     if (!delta) return false;
+    if (this.refilling) {
+      // Inflation has a visual deadline; unlike a hold it can catch up after
+      // a slow foreground frame. The app pauses its clock while hidden.
+      this._refillElapsed += Math.max(0, finite(dt));
+      this.popAge += Math.max(0, finite(dt));
+      const progress = clamp(this._refillElapsed / this._refillDuration, 0, 1);
+      const remaining = 1 - progress * progress * (3 - 2 * progress);
+      this.collapse = this._refillCollapse * remaining;
+      this.compression = this._refillCompression * remaining;
+      this.bulge = this._refillBulge * remaining;
+      this.x = this._refillX * remaining;
+      this.y = this._refillY * remaining;
+      if (progress >= 1) this.reset();
+      return false;
+    }
     let didPop = false;
 
     if (this.active && !this.popped) {

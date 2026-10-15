@@ -90,7 +90,7 @@ async function check(name, fn) {
 const count = page => page.locator('.bubble-target[data-popped="true"]').count();
 async function reset(page) {
   await page.locator('#reset').click();
-  await page.waitForTimeout(100);
+  await page.waitForFunction(() => __bubbleStates.every(b => !b.refilling && !b.popped));
   assert.equal(await count(page), 0);
 }
 async function center(page, index = 4, offsetX = 0, offsetY = 0) {
@@ -1031,6 +1031,7 @@ async function runWebKitSmoke() {
       await page.locator('#theme').tap(); await page.waitForTimeout(200);
       await page.screenshot({ path: path.join(output, 'webkit-mobile-light-popped.png'), fullPage: true });
       await page.locator('#reset').tap();
+      await page.waitForFunction(() => document.querySelectorAll('[data-popped="true"]').length === 0);
       assert.equal(await page.locator('[data-popped="true"]').count(), 0);
       await page.reload(); await page.waitForSelector('.bubble-target');
       assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
