@@ -1,7 +1,7 @@
 import { BubbleState, DEFAULT_HOLD_SECONDS, refillBubbles } from '../core/physics.js';
 import { FilmRenderer } from '../rendering/renderer.js';
 import { PopAudio, BurstLayer } from '../audio/effects.js';
-import { BUBBLE_COUNT, createBubbleLayout } from '../core/layout.js';
+import { createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
 import { APP_CONFIG } from '../core/config.js';
 import { advanceBrandAccent } from './brand-accent.js';
@@ -16,7 +16,10 @@ const storage = {
   set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }
 };
 const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
-const bubbles=Array.from({length:BUBBLE_COUNT},(_,i)=>new BubbleState(i,savedHold));
+const bubbles=[];
+const bubbleCells=new Map();
+const buttons=[],hapticTargets=[];
+let holdDuration=savedHold;
 const audio=new PopAudio();
 const effects=new BurstLayer($('#bursts'));
 const playground=$('.playground');
@@ -39,29 +42,28 @@ const deviceLighting=new DeviceLighting({
   onChange:vector=>{lightTarget=vector;wake(APP_CONFIG.tiltWakeSeconds);},
   onStatus:status=>{tiltStatus=status;updateTilt();}
 });
-const buttons=bubbles.map((bubble,i)=>{
+function createBubbleCell() {
   const button=document.createElement('button');
-  button.className='bubble-target';button.type='button';button.dataset.index=i;
-  button.setAttribute('aria-label',`Пузырёк ${i+1}. Удерживай, чтобы лопнуть`);
+  button.className='bubble-target';button.type='button';
   button.setAttribute('aria-keyshortcuts','Space Enter');
-  button.dataset.popped='false';
-  $('#targets').append(button);
-  return button;
-});
+  bindBubbleButton(button);
+  let haptic=null;
+  if(nativeHaptics) {
+    haptic=document.createElement('input');
+    haptic.type='checkbox';haptic.setAttribute('switch','');haptic.className='bubble-haptic';
+    haptic.tabIndex=-1;haptic.setAttribute('aria-hidden','true');
+    haptic.addEventListener('click',event=>{
+      const i=Number(haptic.dataset.index);
+      if(reduced||bubbles[i].refilling||hitBubble(event)!==i){event.preventDefault();return;}
+      if(event.isTrusted)buttons[i].focus({preventScroll:true});
+    });
+  }
+  return {bubble:new BubbleState(bubbleCells.size,holdDuration),button,haptic,index:-1};
+}
 // iOS provides native switch haptics only for trusted direct clicks. Keep
 // these targets separate from the accessible hold buttons, and never .click()
 // them from script. The native tick happens on release, not in the pop frame.
 const nativeHaptics='switch' in document.createElement('input')&&matchMedia('(pointer: coarse)').matches;
-const hapticTargets=nativeHaptics?buttons.map((_,i)=>{
-  const input=document.createElement('input');
-  input.type='checkbox';input.setAttribute('switch','');input.className='bubble-haptic';
-  input.tabIndex=-1;input.setAttribute('aria-hidden','true');input.dataset.index=i;
-  input.addEventListener('click',event=>{
-    if(reduced||bubbles[i].refilling||hitBubble(event)!==i){event.preventDefault();return;}
-    if(event.isTrusted)buttons[i].focus({preventScroll:true});
-  });
-  $('#targets').append(input);return input;
-}):[];
 
 function pulse(duration) {
   if(reduced||nativeHaptics||typeof navigator.vibrate!=='function')return;
@@ -111,6 +113,11 @@ function tick(ms) {
     }
     active ||= b.active||b.refilling;
   }
+  // Hidden cells settle during the resize wake period; their refills also
+  // finish, so expanding later never replays an old collapse or pop pulse.
+  for(const cell of bubbleCells.values())if(cell.index<0) {
+    cell.bubble.step(dt,now);active ||= cell.bubble.refilling;
+  }
   const ease=1-Math.exp(-dt*8);
   light.x+=(lightTarget.x-light.x)*ease;light.y+=(lightTarget.y-light.y)*ease;
   light.angle+=(lightTarget.angle-light.angle)*ease;
@@ -123,7 +130,7 @@ function tick(ms) {
 function cancelBubble(index) {
   for(const [pointerId,contact] of pointers) if(contact.index===index) releasePointer(pointerId);
   clearTimeout(activationTimers.get(index));activationTimers.delete(index);
-  keyboardOwners.delete(index);bubbles[index].release();
+  keyboardOwners.delete(index);bubbles[index]?.release();
 }
 function cancelAll() {
   controlTouch=null;
@@ -131,28 +138,53 @@ function cancelAll() {
   for(const pointerId of pointers.keys())releasePointer(pointerId);
   wake();
 }
+let resizeFrame=0,lastGeometry='';
+const cellKey=p=>`${p.row}:${p.column}`;
 function resize() {
-  cancelAll();effects.clear();
-  const geometry=createBubbleLayout(window.innerWidth,diameter);
-  const fullViewport=matchMedia(`(max-width: ${APP_CONFIG.mobileBreakpoint}px)`).matches;
-  const fieldPadding=fullViewport?0:APP_CONFIG.desktopFieldPadding;
-  const width=fullViewport?window.innerWidth:geometry.width+fieldPadding*2;
-  const height=fullViewport?window.innerHeight:geometry.height+fieldPadding*2;
-  const offsetX=fullViewport?(width-geometry.width)/2:fieldPadding;
-  const offsetY=fullViewport?(height-geometry.height)/2:fieldPadding;
-  const actualDiameter=geometry.diameter;
-  const stage=$('.playground');stage.style.width=width+'px';stage.style.height=height+'px';
-  layout=geometry.layout.map(p=>({...p,x:p.x+offsetX,y:p.y+offsetY}));
-  for(let i=0;i<buttons.length;i++) {
-    const p=layout[i],button=buttons[i];
-    Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:actualDiameter+'px',height:actualDiameter+'px'});
-    if(hapticTargets[i])hapticTargets[i].style.cssText=button.style.cssText;
-  }
+  const bounds=playground.getBoundingClientRect();
+  const width=Math.max(1,bounds.width),height=Math.max(1,bounds.height);
   const dpr=Math.min(devicePixelRatio||1,APP_CONFIG.maximumDevicePixelRatio);
+  const signature=`${width}:${height}:${diameter}:${dpr}`;
+  if(signature===lastGeometry)return;
+  lastGeometry=signature;
+  const focusedIndex=buttons.indexOf(document.activeElement);
+  const focusedKey=focusedIndex<0?null:cellKey(layout[focusedIndex]);
+  cancelAll();effects.clear();
+  const geometry=createBubbleLayout(width,diameter,height);
+  const nextLayout=geometry.layout;
+  const changedCells=layout.length!==nextLayout.length||layout.some((p,i)=>cellKey(p)!==cellKey(nextLayout[i]));
+  for(const cell of bubbleCells.values()){cell.index=-1;cell.button.dataset.index=-1;}
+  bubbles.length=buttons.length=hapticTargets.length=0;
+  layout=nextLayout;
+  for(let i=0;i<layout.length;i++) {
+    const p=layout[i],key=cellKey(p);
+    if(!bubbleCells.has(key))bubbleCells.set(key,createBubbleCell());
+    const cell=bubbleCells.get(key),button=cell.button;
+    cell.index=i;cell.bubble.index=i;
+    bubbles.push(cell.bubble);buttons.push(button);
+    button.dataset.index=i;
+    Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:geometry.diameter+'px',height:geometry.diameter+'px'});
+    if(cell.haptic) {
+      cell.haptic.dataset.index=i;cell.haptic.style.cssText=button.style.cssText;
+      hapticTargets.push(cell.haptic);
+    }
+    updateBubbleButton(i);
+  }
+  if(changedCells) {
+    $('#targets').replaceChildren(...buttons,...hapticTargets);
+    if(focusedKey!==null) {
+      const restored=bubbleCells.get(focusedKey);
+      (restored?.index>=0?restored.button:buttons[Math.min(focusedIndex,buttons.length-1)]).focus({preventScroll:true});
+    }
+  }
+  poppedCount=bubbles.filter(b=>b.popped).length;
   renderer?.resize(width,height,dpr);
   effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
   $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
   wake();
+}
+function scheduleResize() {
+  if(!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;resize();});
 }
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
@@ -212,21 +244,24 @@ playground.addEventListener('pointercancel',event=>{
   releasePointer(event.pointerType==='touch'?'touch:'+event.pointerId:event.pointerId);wake();
 });
 playground.addEventListener('lostpointercapture',event=>{releasePointer(event.pointerId);wake();});
-buttons.forEach((button,i)=>{
+function bindBubbleButton(button) {
   button.addEventListener('keydown',event=>{
+    const i=Number(button.dataset.index);
     if(![' ','Enter'].includes(event.key))return;
     event.preventDefault();if(event.repeat)return;
     audio.unlock();if(bubbles[i].press(0,0,.5,performance.now()/1000)) keyboardOwners.set(i,event.key);wake();
   });
   button.addEventListener('keyup',event=>{
+    const i=Number(button.dataset.index);
     if([' ','Enter'].includes(event.key)){
       event.preventDefault();if(keyboardOwners.get(i)!==event.key)return;
       keyboardOwners.delete(i);bubbles[i].release();wake();
     }
   });
-  button.addEventListener('blur',()=>{cancelBubble(i);wake();});
+  button.addEventListener('blur',()=>{cancelBubble(Number(button.dataset.index));wake();});
   // Assistive-technology activation has no physical key/pointer hold.
   button.addEventListener('click',event=>{
+    const i=Number(button.dataset.index);
     if(event.detail===0&&!bubbles[i].active){
       audio.unlock();if(!bubbles[i].press(0,0,.5,performance.now()/1000))return;wake();
       const timer=setTimeout(()=>{
@@ -237,7 +272,7 @@ buttons.forEach((button,i)=>{
       activationTimers.set(i,timer);
     }
   });
-});
+}
 document.addEventListener('touchstart',()=>audio.unlock(),{passive:true});
 document.addEventListener('touchend',()=>audio.unlock(),{passive:true});
 // Browsers may adjust pointer/click coordinates to a nearby control. Raw
@@ -286,6 +321,7 @@ const resetButton=$('#reset');
 function resetFilm() {
   audio.unlock();cancelAll();effects.clear();
   refillBubbles(bubbles,{reduced});
+  refillBubbles([...bubbleCells.values()].filter(cell=>cell.index<0).map(cell=>cell.bubble),{reduced:true});
   poppedCount=bubbles.filter(b=>b.popped).length;
   hapticTargets.forEach(input=>{input.checked=false;});
   buttons.forEach((_,i)=>updateBubbleButton(i));
@@ -353,8 +389,10 @@ function updateHold() {
   $('#hold').setAttribute('aria-valuetext',holdFormat.format(duration)+' секунды');
 }
 $('#hold').addEventListener('input',event=>{
-  cancelAll();bubbles.forEach(b=>b.setHoldDuration(Number(event.target.value)));
-  storage.set('hold',bubbles[0].holdDuration);updateHold();
+  cancelAll();
+  for(const cell of bubbleCells.values())cell.bubble.setHoldDuration(Number(event.target.value));
+  holdDuration=bubbles[0].holdDuration;
+  storage.set('hold',holdDuration);updateHold();
 });
 const settings=$('#settings');
 $('#settings-open').addEventListener('click',()=>{
@@ -412,7 +450,7 @@ function setReduced(value) {
   reduced=value;$('#motion').checked=reduced;document.documentElement.dataset.reduced=String(reduced);
   if(renderer)renderer.reducedMotion=reduced;
   const wasRefilling=bubbles.some(b=>b.refilling);
-  if(reduced)for(const bubble of bubbles)if(bubble.refilling)bubble.reset();
+  if(reduced)for(const {bubble} of bubbleCells.values())if(bubble.refilling)bubble.reset();
   if(reduced&&wasRefilling)$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
   poppedCount=bubbles.filter(b=>b.popped).length;
   buttons.forEach((_,i)=>updateBubbleButton(i));
@@ -420,16 +458,17 @@ function setReduced(value) {
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));
-window.addEventListener('resize',resize);
+window.addEventListener('resize',scheduleResize);
+if(typeof ResizeObserver==='function')new ResizeObserver(scheduleResize).observe(playground);
 window.addEventListener('blur',cancelAll);
 window.addEventListener('pagehide',cancelAll);
 document.addEventListener('visibilitychange',()=>{
   cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else wake();
 });
 $('#film').addEventListener('webglcontextlost',event=>{event.preventDefault();cancelAll();contextLost=true;deviceLighting.setSuspended(true);cancelAnimationFrame(frame);frame=0;});
-$('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;deviceLighting.setSuspended(false);renderer.initialize();resize();});
+$('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;deviceLighting.setSuspended(false);renderer.initialize();lastGeometry='';resize();});
 try { renderer=new FilmRenderer($('#film')); } catch(error) {
   console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
 }
-updateSound();updateHold();setReduced(reduced);setTheme();resize();
+updateSound();setReduced(reduced);setTheme();resize();holdDuration=bubbles[0].holdDuration;updateHold();
 if(tiltWanted) deviceLighting.enable();

@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const output = path.join(root, 'artifacts');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const screenshotsOnly = process.argv.includes('--screenshots-only');
+const checkFilter = process.argv.find(arg => arg.startsWith('--check='))?.slice('--check='.length);
 await mkdir(output, { recursive: true });
 if (process.argv.includes('--webkit-only')) {
   const result = await runWebKitSmoke();
@@ -50,8 +51,9 @@ const report = { url: baseURL, generatedAt: new Date().toISOString(), browser: {
 const browser = await chromium.launch({ headless: true });
 report.browser.chromium = browser.version();
 report.browser.playwright = JSON.parse(await readFile(path.join(playwrightPath, 'package.json'), 'utf8')).version;
-const physics = await readFile(path.join(root, 'public/js/core/physics.js'), 'utf8');
-const instrumentedPhysics = physics.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
+const appSource = await readFile(path.join(root, 'public/js/app/main.js'), 'utf8');
+const instrumentedApp = appSource.replace('const audio=new PopAudio();', 'const audio=new PopAudio(); globalThis.__bubbleStates=bubbles;');
+assert.notEqual(instrumentedApp, appSource, 'App test instrumentation must expose the active scene array.');
 const rendererSource = await readFile(path.join(root, 'public/js/rendering/renderer.js'), 'utf8');
 const instrumentedRenderer = rendererSource.replace('render(bubbles,layout,dark,time,light) {', `render(bubbles,layout,dark,time,light) {
     globalThis.__lastLight={...light}; globalThis.__filmRenderer=this;
@@ -64,7 +66,7 @@ async function context(options = {}) {
   const ctx = await browser.newContext(browserOptions);
   activeContexts.push(ctx);
   if(initScript) await ctx.addInitScript(initScript);
-  await ctx.route('**/js/core/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedPhysics }));
+  await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedApp }));
   await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: instrumentedRenderer }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push({ type: 'pageerror', message: error.message }));
@@ -72,11 +74,12 @@ async function context(options = {}) {
     if (message.type() === 'error') report.errors.push({ type: 'console', message: message.text() });
   });
   await page.goto(baseURL);
-  await page.waitForFunction(() => window.__bubbleStates?.length === 14);
+  await page.waitForFunction(() => window.__bubbleStates?.length > 0);
   await page.waitForTimeout(180);
   return { ctx, page };
 }
 async function check(name, fn) {
+  if (checkFilter && !name.includes(checkFilter)) return;
   if (screenshotsOnly && !name.startsWith('final reloaded') && !name.startsWith('no application')) return;
   try {
     const details = await fn();
@@ -110,7 +113,7 @@ async function inspectStaggeredLayout(page) {
     const bounds = button.getBoundingClientRect();
     return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, radius: bounds.width / 2 };
   }));
-  assert.equal(geometry.length, 14);
+  assert.ok(geometry.length > 0, 'The available field contains playable bubbles.');
   const rows = [];
   for (const bubble of geometry) {
     let row = rows.find(items => Math.abs(items[0].y - bubble.y) < 0.5);
@@ -119,13 +122,21 @@ async function inspectStaggeredLayout(page) {
   }
   rows.sort((a, b) => a[0].y - b[0].y);
   rows.forEach(row => row.sort((a, b) => a.x - b.x));
-  assert.deepEqual(rows.map(row => row.length), [3, 4, 3, 4]);
-  const pitch = rows[1][1].x - rows[1][0].x;
-  assert.ok(Math.abs((rows[0][0].x - rows[1][0].x) - pitch / 2) < 0.75, 'Short rows must be offset by half a pocket pitch.');
-  assert.ok(Math.abs(rows[0][0].x - rows[2][0].x) < 0.5);
-  assert.ok(Math.abs(rows[1][0].x - rows[3][0].x) < 0.5);
-  // Include the sealed lip and the stretched footprint, rather than only the
-  // smaller circular DOM hit targets. Leave room for finger deformation.
+  const maximumColumns = Math.max(...rows.map(row => row.length));
+  const pitch = maximumColumns > 1
+    ? rows.find(row => row.length === maximumColumns)[1].x - rows.find(row => row.length === maximumColumns)[0].x
+    : 0;
+  for (let i = 0; i < rows.length; i++) {
+    assert.equal(rows[i].length, maximumColumns === 1 ? 1 : maximumColumns - (rows.length > 1 && i % 2 === 0 ? 1 : 0),
+      'Rows alternate between one fewer column and the full column count.');
+    if (i > 0 && maximumColumns > 1) {
+      assert.ok(Math.abs(Math.abs(rows[i][0].x - rows[i - 1][0].x) - pitch / 2) < .75,
+        'Adjacent rows are staggered by half a pocket pitch.');
+    }
+    if (i > 1) assert.ok(Math.abs(rows[i][0].x - rows[i - 2][0].x) < .5);
+  }
+  // The sealed lip and maximum pressed footprint must stay apart and inside
+  // the playable region, including the final row near the viewport edge.
   let minimumGap = Infinity;
   for (let i = 0; i < geometry.length; i++) for (let j = i + 1; j < geometry.length; j++) {
     const a = geometry[i], b = geometry[j];
@@ -133,12 +144,47 @@ async function inspectStaggeredLayout(page) {
     minimumGap = Math.min(minimumGap, gap);
     assert.ok(gap >= -0.2, `Visible pockets ${i + 1} and ${j + 1} overlap by ${-gap}px.`);
   }
-  const viewportWidth = await page.evaluate(() => innerWidth);
+  const stage = await page.locator('.playground').boundingBox();
   for (const bubble of geometry) {
-    assert.ok(bubble.x - bubble.radius * 1.14 >= -0.5);
-    assert.ok(bubble.x + bubble.radius * 1.14 <= viewportWidth + 0.5);
+    assert.ok(bubble.x - bubble.radius * 1.14 >= stage.x - .5);
+    assert.ok(bubble.x + bubble.radius * 1.14 <= stage.x + stage.width + .5);
+    assert.ok(bubble.y - bubble.radius * 1.14 >= stage.y - .5);
+    assert.ok(bubble.y + bubble.radius * 1.14 <= stage.y + stage.height + .5);
   }
-  return { rowCounts: rows.map(row => row.length), pitch, minimumVisibleGapPx: minimumGap, viewportWidth };
+  return { count: geometry.length, rowCounts: rows.map(row => row.length), pitch, minimumVisibleGapPx: minimumGap };
+}
+
+async function inspectViewportField(page) {
+  const geometry = await page.evaluate(() => {
+    const stage = document.querySelector('.playground').getBoundingClientRect();
+    const intro = document.querySelector('.intro').getBoundingClientRect();
+    return { stage: { x: stage.x, y: stage.y, width: stage.width, height: stage.height, bottom: stage.bottom }, introBottom: intro.bottom,
+      viewport: { width: innerWidth, height: innerHeight }, count: document.querySelectorAll('.bubble-target').length,
+      document: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight } };
+  });
+  assert.equal(geometry.stage.x, 0, 'The grid spans the available viewport width.');
+  assert.equal(geometry.stage.width, geometry.viewport.width);
+  assert.ok(geometry.stage.y >= geometry.introBottom, 'Bubbles begin below the heading.');
+  assert.ok(Math.abs(geometry.stage.bottom - geometry.viewport.height) <= 1, 'The film reaches the bottom of the viewport.');
+  assert.ok(geometry.document.width <= geometry.viewport.width && geometry.document.height <= geometry.viewport.height,
+    'The full field must not create page overflow.');
+  return geometry;
+}
+
+async function scene(page) {
+  return page.evaluate(() => __filmLayout.map((p, index) => {
+    const b = __bubbleStates[index];
+    return { key: `${p.row}:${p.column}`, row: p.row, column: p.column, index, popped: b.popped, seed: b.seed, popX: b.popX, popY: b.popY };
+  }));
+}
+async function resizeScene(page, viewport) {
+  await page.setViewportSize(viewport);
+  await page.waitForFunction(() => {
+    const stage = document.querySelector('.playground').getBoundingClientRect();
+    return Math.abs(stage.width - innerWidth) < .5 && Math.abs(stage.bottom - innerHeight) < 1
+      && __filmLayout.length === __bubbleStates.length && document.querySelectorAll('.bubble-target').length === __bubbleStates.length;
+  });
+  await page.waitForTimeout(80);
 }
 
 async function captureFilmReflections(page, label, referenceLabel = null) {
@@ -209,8 +255,13 @@ function assertReflectionOrbit(neutral, tilted) {
 
 try {
   const { page } = await context({ viewport: { width: 1365, height: 900 }, deviceScaleFactor: 1 });
-  await check('desktop renders fourteen pockets without the WebGL error state', async () => {
-    assert.equal(await page.locator('.bubble-target').count(), 14);
+  await check('adaptive desktop grid fills the viewport below the heading', async () => {
+    const geometry = await inspectViewportField(page);
+    assert.ok(geometry.count > 14, 'A desktop viewport receives more cells than the previous fixed scene.');
+    return { ...geometry, ...await inspectStaggeredLayout(page) };
+  });
+  await check('desktop renders a full adaptive field without the WebGL error state', async () => {
+    assert.equal(await page.locator('.bubble-target').count(), await page.evaluate(() => __bubbleStates.length));
     assert.equal(await page.locator('#render-error').isVisible(), false);
     const fieldPadding = await page.evaluate(() => {
       const stage = document.querySelector('.playground').getBoundingClientRect();
@@ -239,10 +290,117 @@ try {
       overflow: 'hidden',
       transform: 'none',
     }, 'The unrotated film field clips the film and pockets, while burst effects remain free.');
-    assert.ok(fieldPadding.horizontal >= 48 && fieldPadding.horizontal < 52, 'Desktop keeps a compact horizontal margin around the bubbles.');
-    assert.ok(fieldPadding.vertical >= 48 && fieldPadding.vertical < 52, 'Desktop keeps a compact vertical margin around the bubbles.');
+    assert.ok(fieldPadding.horizontal >= 0 && fieldPadding.vertical >= 0, 'The outer cells remain inside the field.');
     await screenshot(page, 'desktop-dark.png');
     return { fieldPadding, ...await inspectStaggeredLayout(page) };
+  });
+  await check('adaptive resize preserves popped identities, restores hidden edge cells and adds new cells', async () => {
+    const { page: probe } = await context({ viewport: { width: 1100, height: 800 } });
+    const initial = await scene(probe);
+    const retained = initial.find(p => p.row === 1 && p.column === 1);
+    const edge = initial.filter(p => p.row === 1).at(-1);
+    assert.ok(edge.column > retained.column, 'The fixture includes a cell that a narrow viewport will hide.');
+    await probe.evaluate(keys => {
+      window.__resizeReferences = new Map(keys.map(key => {
+        const index = __filmLayout.findIndex(p => `${p.row}:${p.column}` === key);
+        document.querySelector(`.bubble-target[data-index="${index}"]`).click();
+        return [key, __bubbleStates[index]];
+      }));
+    }, [retained.key, edge.key]);
+    await probe.waitForFunction(() => [...__resizeReferences.values()].every(b => b.popped));
+    const poppedInitial = (await scene(probe)).filter(p => p.popped);
+    const edgePoint = await center(probe, edge.index, .25, -.1);
+    await probe.mouse.move(edgePoint.x, edgePoint.y); await probe.mouse.down();
+    await probe.waitForFunction(index => Math.hypot(__bubbleStates[index].x, __bubbleStates[index].y) > .1, edge.index);
+    await resizeScene(probe, { width: 390, height: 844 });
+    await probe.mouse.up();
+    await probe.waitForFunction(key => {
+      const b = __resizeReferences.get(key);
+      return !b.active && b.collapse > .99 && Math.hypot(b.x, b.y) < .001;
+    }, edge.key);
+    const narrow = await scene(probe);
+    assert.ok(narrow.length < initial.length);
+    assert.equal(narrow.some(p => p.key === edge.key), false, 'An edge cell leaves the active scene when the window narrows.');
+    assert.equal(narrow.find(p => p.key === retained.key).popped, true);
+    assert.equal(await probe.evaluate(key => {
+      const index = __filmLayout.findIndex(p => `${p.row}:${p.column}` === key);
+      return __bubbleStates[index] === __resizeReferences.get(key);
+    }, retained.key), true, 'Surviving cells retain the same simulation state.');
+    const fresh = narrow.find(p => !p.popped);
+    await probe.locator(`.bubble-target[data-index="${fresh.index}"]`).evaluate(button => button.click());
+    await probe.waitForFunction(index => __bubbleStates[index].popped, fresh.index);
+    const activePopped = await count(probe);
+    assert.match(await probe.locator('#announcement').textContent(), new RegExp(`${activePopped} из ${narrow.length} пузырьков`),
+      'Progress uses the current active scene count.');
+    await resizeScene(probe, { width: 1450, height: 950 });
+    const expanded = await scene(probe);
+    assert.ok(expanded.length > initial.length, 'A larger field adds cells beyond the previous scene.');
+    for (const before of poppedInitial) {
+      const after = expanded.find(p => p.key === before.key);
+      assert.equal(after.popped, true);
+      assert.equal(after.seed, before.seed);
+      assert.equal(after.popX, before.popX);
+      assert.equal(after.popY, before.popY);
+    }
+    assert.equal(await probe.evaluate(key => {
+      const index = __filmLayout.findIndex(p => `${p.row}:${p.column}` === key);
+      return __bubbleStates[index] === __resizeReferences.get(key);
+    }, edge.key), true, 'An edge cell returns with its cached simulation object.');
+    const initialKeys = new Set(initial.map(p => p.key));
+    const added = expanded.filter(p => !initialKeys.has(p.key));
+    assert.ok(added.length > 0 && added.every(p => !p.popped), 'New cells begin intact.');
+    await inspectViewportField(probe);
+    return { initialCount: initial.length, narrowCount: narrow.length, expandedCount: expanded.length, retained: retained.key, hiddenEdge: edge.key };
+  });
+  await check('adaptive resize cancels an interrupted hold without a delayed pop', async () => {
+    const { page: probe } = await context({ viewport: { width: 1100, height: 800 } });
+    const target = (await scene(probe)).find(p => p.row === 1 && p.column === 1);
+    await probe.evaluate(index => __bubbleStates[index].setHoldDuration(.45), target.index);
+    const point = await center(probe, target.index);
+    await probe.mouse.move(point.x, point.y); await probe.mouse.down();
+    await probe.waitForFunction(index => __bubbleStates[index].active, target.index);
+    await probe.waitForTimeout(70);
+    await resizeScene(probe, { width: 390, height: 844 });
+    await probe.waitForTimeout(600);
+    assert.equal(await probe.evaluate(() => __bubbleStates.some(b => b.active)), false);
+    assert.equal(await count(probe), 0, 'A press cancelled by resizing cannot pop later.');
+    await probe.mouse.up();
+  });
+  await check('reset also restores cached cells hidden outside a narrow viewport', async () => {
+    const { page: probe } = await context({ viewport: { width: 1100, height: 800 } });
+    const initial = await scene(probe);
+    const edge = initial.filter(p => p.row === 1).at(-1);
+    await probe.locator(`.bubble-target[data-index="${edge.index}"]`).evaluate(button => button.click());
+    await probe.waitForFunction(index => __bubbleStates[index].popped, edge.index);
+    await resizeScene(probe, { width: 390, height: 844 });
+    assert.equal((await scene(probe)).some(p => p.key === edge.key), false);
+    await reset(probe);
+    await resizeScene(probe, { width: 1100, height: 800 });
+    const restored = (await scene(probe)).find(p => p.key === edge.key);
+    assert.equal(restored.popped, false, 'Reset must clear an out-of-view popped cell before it returns.');
+    assert.equal(await count(probe), 0);
+  });
+  await check('mobile orientation and bubble size repack the whole remaining viewport', async () => {
+    const { page: probe } = await context({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const portrait = await inspectStaggeredLayout(probe);
+    await inspectViewportField(probe);
+    await resizeScene(probe, { width: 844, height: 390 });
+    const landscape = await inspectStaggeredLayout(probe);
+    await inspectViewportField(probe);
+    assert.ok(landscape.rowCounts.length < portrait.rowCounts.length, 'Landscape uses fewer rows in its shorter field.');
+    assert.ok(Math.max(...landscape.rowCounts) > Math.max(...portrait.rowCounts), 'Landscape adds columns across the wider field.');
+    await resizeScene(probe, { width: 390, height: 844 });
+    await probe.locator('#settings-open').tap();
+    await probe.locator('#size').fill('64');
+    await probe.locator('#settings-close').tap();
+    const smaller = await inspectStaggeredLayout(probe);
+    await probe.locator('#settings-open').tap();
+    await probe.locator('#size').fill('100');
+    await probe.locator('#settings-close').tap();
+    const larger = await inspectStaggeredLayout(probe);
+    assert.ok(smaller.count > larger.count, 'Smaller bubbles increase the active count instead of leaving unused space.');
+    await inspectViewportField(probe);
+    return { portrait: portrait.rowCounts, landscape: landscape.rowCounts, smallerCount: smaller.count, largerCount: larger.count };
   });
   await check('sheet and cap programs keep separate uniforms within a 64-vector WebGL budget', async () => {
     const details=await page.evaluate(()=>{
@@ -264,10 +422,11 @@ try {
   await check('local strain relights neighbours and tiled sheet matches a full pass at fractional DPR', async () => {
     const results=[];
     for(const dpr of [1.25,2.5]) {
-      const {ctx:probeContext,page:probe}=await context({viewport:{width:390,height:844},deviceScaleFactor:dpr});
+      const {ctx:probeContext,page:probe}=await context({viewport:{width:390,height:600},deviceScaleFactor:dpr});
       try {
         const details=await probe.evaluate(()=>{
         const renderer=__filmRenderer,states=__bubbleStates,layout=__filmLayout;
+        if(layout.length>24)throw new Error('The full-pass comparison fixture must fit the sheet shader site budget.');
         states[4].setHoldDuration(2);states[4].press(.5,-.3);
         for(let i=0;i<4;i++)states[4].step(1/60);
         const draw=dark=>renderer.render(states,layout,dark,__filmTime,{x:0,y:0,angle:0});
@@ -297,7 +456,7 @@ try {
       });
         assert.ok(details.neighbours>0);assert.equal(details.responding,details.neighbours);
         assert.equal(details.untouched,true);assert.equal(details.error,0);
-        for(const comparison of details.comparisons)assert.ok(comparison.maximumDifference<=2,`Tile seam differs by ${comparison.maximumDifference} levels`);
+        for(const comparison of details.comparisons)assert.ok(comparison.maximumDifference<=2,`Tile seam differs by ${comparison.maximumDifference} levels at DPR ${details.dpr}, dark=${comparison.dark}`);
         results.push(details);
       } finally { await probeContext.close(); }
     }
@@ -318,7 +477,7 @@ try {
     assert.equal(await page.evaluate(() => __bubbleStates[4].compression), 0);
   });
   await check('off-center press deforms then restores on early release', async () => {
-    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(2));
     const p = await center(page, 4, -0.32, 0.16);
     await page.mouse.move(p.x, p.y); await page.mouse.down();
     await page.waitForTimeout(220);
@@ -363,12 +522,13 @@ try {
     assert.equal(await count(page),1);assert.equal(await page.locator('#announcement').textContent(),announcement);
     assert.equal(await page.locator('.bubble-target').nth(4).getAttribute('aria-disabled'),null);
     await screenshot(page,'desktop-popped-kneading.png');
-    await page.mouse.up();await page.waitForTimeout(850);
+    await page.mouse.up();
+    await page.waitForFunction(() => { const b=__bubbleStates[4]; return !b.active&&Math.hypot(b.x,b.y)<.001&&Math.abs(b.compression-.06)<.001; });
     const released=await read();assert.ok(!released.active&&Math.abs(released.compression-.06)<.001&&released.bulge===0);
     assert.ok(Math.hypot(released.x,released.y)<.001);assert.ok(released.collapse>.99);
     return {held,moved,released};
   });
-  await check('reset restores all fourteen pockets', () => reset(page));
+  await check('reset restores all active pockets', () => reset(page));
   await check('«Ещё» changes the logo accent without repeating it', async () => {
     const previous = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
     assert.notEqual(previous, null);
@@ -390,7 +550,7 @@ try {
     const p=await center(page);await page.mouse.move(p.x,p.y);await page.mouse.down();
     await page.waitForTimeout(1000);assert.equal(await count(page),0);await page.mouse.up();
     await page.locator('#settings-open').click();await page.locator('#hold').fill('0.24');await page.locator('#settings-close').click();
-    await page.reload();await page.waitForFunction(()=>__bubbleStates?.length===14);
+    await page.reload();await page.waitForFunction(()=>__bubbleStates?.length>0);
     assert.ok(await page.evaluate(()=>__bubbleStates.every(b=>b.holdDuration===.24)));
     const q=await center(page);await page.mouse.move(q.x,q.y);await page.mouse.down();await waitPopped(page,4,1200);await page.mouse.up();
     await page.locator('#settings-open').click();await page.locator('#hold').fill('0.3');await page.locator('#settings-close').click();
@@ -399,11 +559,13 @@ try {
   await check('edge rupture contact stays fixed after release, theme toggle and resize', async () => {
     const originalViewport = page.viewportSize();
     const originalTheme = await page.locator('html').getAttribute('data-theme');
-    const readContact = () => page.evaluate(() => ({ popX: __bubbleStates[4].popX, popY: __bubbleStates[4].popY }));
+    const identity = { row: 1, column: 1 };
+    const readContact = () => page.evaluate(({ row, column }) => { const index=__filmLayout.findIndex(p=>p.row===row&&p.column===column); return {popX:__bubbleStates[index].popX,popY:__bubbleStates[index].popY}; }, identity);
     try {
-      const p = await center(page, 4, 0.34, -0.13);
+      const index=await page.evaluate(({row,column})=>__filmLayout.findIndex(p=>p.row===row&&p.column===column),identity);
+      const p = await center(page, index, 0.34, -0.13);
       await page.mouse.move(p.x, p.y); await page.mouse.down();
-      await waitPopped(page);
+      await waitPopped(page,index);
       const contact = await readContact();
       assert.ok(Math.abs(contact.popX - 0.68) < 0.025 && Math.abs(contact.popY + 0.26) < 0.025,
         'The rupture must preserve the actual off-centre mouse contact.');
@@ -416,7 +578,8 @@ try {
       await page.setViewportSize({ width: 390, height: 844 });
       await page.waitForTimeout(150);
       assert.deepEqual(await readContact(), contact, 'Resizing the film must preserve normalized rupture coordinates.');
-      assert.equal(await page.locator('.bubble-target').nth(4).getAttribute('data-popped'), 'true');
+      const resizedIndex=await page.evaluate(({row,column})=>__filmLayout.findIndex(p=>p.row===row&&p.column===column),identity);
+      assert.equal(await page.locator(`.bubble-target[data-index="${resizedIndex}"]`).getAttribute('data-popped'), 'true');
       if (await page.locator('html').getAttribute('data-theme') !== 'light') await page.locator('#theme').click();
       await screenshot(page, 'edge-pop-light.png');
       return { ...contact, resizedViewport: { width: 390, height: 844 } };
@@ -430,7 +593,7 @@ try {
   for (const cancellation of ['pointercancel', 'lostpointercapture', 'move-away']) {
     await check(`${cancellation} cancels an incomplete hold`, async () => {
       await reset(page);
-      await page.evaluate(() => __bubbleStates[4].setHoldDuration(1));
+      await page.evaluate(() => __bubbleStates[4].setHoldDuration(2));
       try {
         const p = await center(page);
         await page.mouse.move(p.x, p.y); await page.mouse.down();
@@ -476,14 +639,14 @@ try {
   await check('light theme persists after reload', async () => {
     await page.locator('#theme').click();
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
-    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);
+    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length > 0);
     assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
     await page.waitForTimeout(200); await screenshot(page, 'desktop-light.png');
   });
   await check('sound mute persists and can be enabled again', async () => {
     await page.locator('#sound').click();
     assert.equal(await page.locator('#sound').getAttribute('aria-pressed'), 'false');
-    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);
+    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length > 0);
     assert.equal(await page.locator('#sound').getAttribute('aria-pressed'), 'false');
     await page.locator('#sound').click();
     assert.equal(await page.locator('#sound').getAttribute('aria-pressed'), 'true');
@@ -570,7 +733,7 @@ try {
       };
     });
     assert.equal(presentation.motionUsesTiltSwitch, true);
-    assert.deepEqual(presentation.stage, { x: 0, y: 0, ...presentation.viewport });
+    await inspectViewportField(mobile);
     assert.equal(await mobile.locator('.sheet').evaluate(sheet => getComputedStyle(sheet).boxShadow), 'none');
     await mobile.locator('#theme').tap(); await mobile.waitForTimeout(200);
     await screenshot(mobile, 'mobile-light.png');
@@ -583,9 +746,9 @@ try {
     assert.ok(await mobile.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     const bounds = await mobile.locator('.playground').boundingBox();
     assert.equal(bounds.x, 0);
-    assert.equal(bounds.y, 0);
     assert.equal(bounds.width, await mobile.evaluate(() => innerWidth));
-    assert.equal(bounds.height, await mobile.evaluate(() => innerHeight));
+    assert.ok(bounds.y > 0);
+    await inspectViewportField(mobile);
     await screenshot(mobile, 'mobile-320-light.png');
     await mobile.locator('#settings-close').tap();
     return { bounds, ...await inspectStaggeredLayout(mobile) };
@@ -635,7 +798,7 @@ try {
     return {initial,shifted,permissionCalls:1,reflectionMovements};
   });
   await check('tilt switch preserves both choices on reload and reuses granted sensor events without a prompt',async()=>{
-    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length===14);
+    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length>0);
     await tilt.locator('#settings-open').click();
     assert.equal(await tilt.locator('#tilt').getAttribute('role'),'switch');
     assert.equal(await tilt.locator('#tilt').isChecked(),true);
@@ -653,7 +816,7 @@ try {
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
     await tilt.locator('#tilt').uncheck();
     assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');
-    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length===14);
+    await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length>0);
     await tilt.locator('#settings-open').click();
     assert.equal(await tilt.locator('#tilt').isChecked(),false);
     assert.equal(await tilt.locator('#tilt-permission').isVisible(),false);
@@ -686,10 +849,10 @@ try {
     assert.equal(await prompt.locator('#tilt-permission').isVisible(),false);
   });
   await check('final reloaded renderer screenshots and all-popped frame sample', async () => {
-    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length === 14);
+    await page.reload(); await page.waitForFunction(() => __bubbleStates?.length > 0);
     if (await page.locator('html').getAttribute('data-theme') !== 'dark') await page.locator('#theme').click();
     await page.waitForTimeout(250); await screenshot(page, 'desktop-dark.png');
-    await page.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
+    await page.evaluate(() => __bubbleStates[4].setHoldDuration(2));
     const edge = await center(page, 4, -0.32, 0.16);
     await page.mouse.move(edge.x, edge.y); await page.mouse.down(); await page.waitForTimeout(220);
     await screenshot(page, 'desktop-edge-press.png'); await page.mouse.up(); await page.waitForTimeout(500);
@@ -704,9 +867,9 @@ try {
     await page.locator('#theme').click(); await page.waitForTimeout(200); await screenshot(page, 'desktop-light.png');
     await page.locator('#theme').click();
     // Use the same public interaction events, with assistive activation, to
-    // keep all fourteen pockets animating at once for the inexpensive frame sample.
+    // keep all active pockets animating at once for the inexpensive frame sample.
     await page.locator('.bubble-target').evaluateAll(buttons => buttons.forEach(button => button.click()));
-    await page.waitForFunction(() => document.querySelectorAll('.bubble-target[data-popped="true"]').length === 14);
+    await page.waitForFunction(() => document.querySelectorAll('.bubble-target[data-popped="true"]').length === document.querySelectorAll('.bubble-target').length);
     const frameSample = await page.evaluate(async () => {
       const samples = [];
       let previous = performance.now();
@@ -719,11 +882,11 @@ try {
       return { count: samples.length, medianMs: samples[Math.floor(samples.length / 2)], p95Ms: samples[Math.floor(samples.length * .95)], maxMs: samples.at(-1), note: 'Headless Chromium timing, not a mobile-device performance claim.' };
     });
     await mobile.setViewportSize({ width: 390, height: 844 });
-    await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length === 14);
+    await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length > 0);
     await mobile.evaluate(() => { localStorage.setItem('bubble.size', '84'); localStorage.setItem('bubble.theme', 'light'); });
-    await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length === 14);
+    await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length > 0);
     await mobile.waitForTimeout(250); await screenshot(mobile, 'mobile-light.png');
-    await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(0.8));
+    await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(2));
     const pressPoint = await center(mobile, 4, -0.32, 0.16);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...pressPoint, id: 1, force: .5 }] });
     await mobile.waitForTimeout(220); await screenshot(mobile, 'mobile-mid-press.png');
@@ -744,7 +907,7 @@ try {
     await screenshot(mobile, 'mobile-light-popped.png');
     await mobile.locator('main').screenshot({ path: path.join(output, 'mobile-light-preview.png') });
     report.screenshots.push('mobile-light-preview.png');
-    await writeFile(path.join(output, 'comparison.html'), `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Bubble — сравнение тем</title><style>*{box-sizing:border-box}body{margin:0;padding:28px;background:#d5dde2;font-family:system-ui;color:#25333d}h1{font-size:21px;font-weight:500;margin:0 0 8px}p{font-size:13px;margin:0 0 22px}section{display:flex;gap:24px;align-items:flex-start}figure{margin:0;width:390px}figcaption{font-size:12px;margin-bottom:10px}img{display:block;width:390px;height:auto;border-radius:12px}</style><h1>Пупырчатая плёнка · 3–4–3–4</h1><p>Одинаковые 14 пузырьков. Четыре лопнувших сохраняют форму в обеих темах.</p><section><figure><figcaption>Тёмная тема</figcaption><img src="mobile-dark-preview.png" alt="Тёмная тема с четырьмя лопнувшими пузырьками"></figure><figure><figcaption>Светлая тема</figcaption><img src="mobile-light-preview.png" alt="Светлая тема с теми же четырьмя лопнувшими пузырьками"></figure></section></html>`);
+    await writeFile(path.join(output, 'comparison.html'), `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Bubble — сравнение тем</title><style>*{box-sizing:border-box}body{margin:0;padding:28px;background:#d5dde2;font-family:system-ui;color:#25333d}h1{font-size:21px;font-weight:500;margin:0 0 8px}p{font-size:13px;margin:0 0 22px}section{display:flex;gap:24px;align-items:flex-start}figure{margin:0;width:390px}figcaption{font-size:12px;margin-bottom:10px}img{display:block;width:390px;height:auto;border-radius:12px}</style><h1>Пупырчатая плёнка · адаптивное поле</h1><p>Одно и то же поле пузырьков. Четыре лопнувших сохраняют форму в обеих темах.</p><section><figure><figcaption>Тёмная тема</figcaption><img src="mobile-dark-preview.png" alt="Тёмная тема с четырьмя лопнувшими пузырьками"></figure><figure><figcaption>Светлая тема</figcaption><img src="mobile-light-preview.png" alt="Светлая тема с теми же четырьмя лопнувшими пузырьками"></figure></section></html>`);
     const comparison = await page.context().newPage();
     await comparison.setViewportSize({ width: 860, height: 1100 });
     await comparison.goto(pathToFileURL(path.join(output, 'comparison.html')).href);
@@ -985,7 +1148,7 @@ try {
   for (const ctx of activeContexts) await ctx.close();
   await browser.close();
   report.summary = { passed: report.checks.filter(item => item.status === 'passed').length, failed: report.checks.filter(item => item.status === 'failed').length };
-  await writeFile(path.join(output, screenshotsOnly ? 'visual-report.json' : 'browser-report.json'), JSON.stringify(report, null, 2));
+  await writeFile(path.join(output, checkFilter ? 'browser-filtered-report.json' : screenshotsOnly ? 'visual-report.json' : 'browser-report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report.summary));
 }
 process.exitCode = report.summary.failed ? 1 : 0;

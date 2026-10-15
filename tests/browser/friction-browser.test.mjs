@@ -48,11 +48,8 @@ const report = { generatedAt: new Date().toISOString(), url: baseURL, browsers: 
   'Current iOS native switch feedback requires a trusted direct click and cannot accompany every held or sliding pop.',
 ] };
 const appSource = await readFile(path.join(root, 'public/js/app/main.js'), 'utf8');
-const appInstrumented = appSource.replace('const audio=new PopAudio();', 'const audio=new PopAudio(); globalThis.__interactionAudio=audio;');
+const appInstrumented = appSource.replace('const audio=new PopAudio();', 'const audio=new PopAudio(); globalThis.__interactionAudio=audio; globalThis.__bubbleStates=bubbles;');
 assert.notEqual(appSource, appInstrumented);
-const physicsSource = await readFile(path.join(root, 'public/js/core/physics.js'), 'utf8');
-const physicsInstrumented = physicsSource.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
-assert.notEqual(physicsSource, physicsInstrumented);
 const rendererSource = await readFile(path.join(root, 'public/js/rendering/renderer.js'), 'utf8');
 const rendererInstrumented = rendererSource.replace('render(bubbles,layout,dark,time,light) {',
   'render(bubbles,layout,dark,time,light) { globalThis.__interactionRenderer=this;');
@@ -69,18 +66,17 @@ async function context(options = {}, targetBrowser = browser) {
     localStorage.setItem('bubble.motion', 'false');
     window.__hapticCalls = [];
     Object.defineProperty(navigator, 'vibrate', { configurable: true, value: duration => {
-      __hapticCalls.push({ duration, active: (window.__bubbleStates ?? []).filter(b => b.active).map(b => b.index) });
+      __hapticCalls.push({ duration, active: (window.__bubbleStates ?? []).flatMap((b, index) => b.active ? [index] : []) });
       return true;
     } });
   }, { hold });
   await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
-  await ctx.route('**/js/core/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: physicsInstrumented }));
   await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: rendererInstrumented }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
   await page.goto(baseURL);
-  await page.waitForFunction(() => window.__bubbleStates?.length === 14 && window.__interactionAudio);
+  await page.waitForFunction(() => window.__bubbleStates?.length > 0 && window.__interactionAudio);
   await page.waitForTimeout(180);
   return { ctx, page };
 }
@@ -99,8 +95,23 @@ async function pocket(page, index = 4) {
   const bounds = await page.locator('.bubble-target').nth(index).boundingBox();
   return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, radius: bounds.width / 2 };
 }
-const popped = page => page.evaluate(() => __bubbleStates.filter(b => b.popped).map(b => b.index));
-const active = page => page.evaluate(() => __bubbleStates.filter(b => b.active).map(b => b.index));
+async function adjacentPockets(page, count = 2) {
+  return page.locator('.bubble-target').evaluateAll((buttons, count) => {
+    const rows = [];
+    for (const button of buttons) {
+      const bounds = button.getBoundingClientRect();
+      const point = { index: Number(button.dataset.index), x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2, radius: bounds.width / 2 };
+      let row = rows.find(row => Math.abs(row[0].y - point.y) < .5);
+      if (!row) { row = []; rows.push(row); }
+      row.push(point);
+    }
+    const row = rows.find(row => row.length >= count);
+    if (!row) throw new Error(`The fixture requires a row of ${count} adjacent pockets.`);
+    return row.sort((a, b) => a.x - b.x).slice(0, count);
+  }, count);
+}
+const popped = page => page.evaluate(() => __bubbleStates.flatMap((b, index) => b.popped ? [index] : []));
+const active = page => page.evaluate(() => __bubbleStates.flatMap((b, index) => b.active ? [index] : []));
 const haptics = page => page.evaluate(() => __hapticCalls);
 const waitPopped = (page, index) => page.waitForFunction(i => __bubbleStates[i].popped, index, { timeout: 1800 });
 async function analyse(page) {
@@ -254,7 +265,7 @@ async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
     theme: document.documentElement.dataset.theme,
     sound: __interactionAudio.enabled,
     settings: document.querySelector('#settings').open,
-    popped: __bubbleStates.filter(b => b.popped).map(b => b.index),
+    popped: __bubbleStates.flatMap((b, index) => b.popped ? [index] : []),
     switches: [...document.querySelectorAll('.bubble-haptic')].map(input => input.checked),
   }));
   const clearCounts = () => page.evaluate(() => { __controlWrites = []; __settingsOpens = 0; });
@@ -469,8 +480,8 @@ try {
   await check('intact and popped rubbing are silent while pop remains audible', () => soundScenario());
   await check('background and outside-circle retargeted presses do not pop or vibrate', async () => {
     const { page } = await context();
-    const a = await pocket(page, 4), b = await pocket(page, 5);
-    await page.mouse.move((a.x + b.x) / 2, a.y); await page.mouse.down();
+    const a = await pocket(page, 4);
+    await page.mouse.move(a.x + a.radius * 1.17, a.y); await page.mouse.down();
     await page.waitForTimeout(400); await page.mouse.up();
     assert.deepEqual(await popped(page), []); assert.deepEqual(await haptics(page), []);
     // Mobile hit adjustment can deliver a press to a nearby DOM target.
@@ -498,44 +509,44 @@ try {
   });
   await check('one held mouse gesture pops adjacent pockets with separate hold times', async () => {
     const { page } = await context();
-    const a = await pocket(page, 4), b = await pocket(page, 5);
-    await page.mouse.move(a.x, a.y); await page.mouse.down(); await waitPopped(page, 4);
+    const [a, b] = await adjacentPockets(page);
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await waitPopped(page, a.index);
     await page.mouse.move(b.x, b.y);
-    assert.deepEqual(await active(page), [5]); assert.deepEqual(await popped(page), [4]);
-    await waitPopped(page, 5); await page.mouse.up();
-    assert.deepEqual(await popped(page), [4, 5]); assert.deepEqual(await active(page), []);
+    assert.deepEqual(await active(page), [b.index]); assert.deepEqual(await popped(page), [a.index]);
+    await waitPopped(page, b.index); await page.mouse.up();
+    assert.deepEqual(await popped(page), [a.index, b.index]); assert.deepEqual(await active(page), []);
     assert.equal((await haptics(page)).length, 4, 'Each accepted contact and each pop gives one pulse.');
   });
   await check('touch can start on film, cross gaps and pop three pockets without lifting', async () => {
     const { ctx, page } = await context({ isMobile: true, hasTouch: true });
     const cdp = await ctx.newCDPSession(page);
-    const a = await pocket(page, 4), b = await pocket(page, 5), c = await pocket(page, 6);
+    const [a, b, c] = await adjacentPockets(page, 3);
     const move = (type, point) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: point ? [{ x: point.x, y: point.y, id: 1, force: .5, radiusX: 5, radiusY: 5 }] : [] });
     await move('touchStart', { x: (a.x + b.x) / 2, y: a.y });
     await page.waitForTimeout(350); assert.deepEqual(await active(page), []); assert.deepEqual(await haptics(page), []);
-    for (const [index, point] of [[4, a], [5, b], [6, c]]) {
+    for (const [index, point] of [[a.index, a], [b.index, b], [c.index, c]]) {
       await move('touchMove', point); assert.deepEqual(await active(page), [index]);
       await waitPopped(page, index);
     }
     await move('touchEnd');
-    assert.deepEqual(await popped(page), [4, 5, 6]); assert.deepEqual(await active(page), []);
+    assert.deepEqual(await popped(page), [a.index, b.index, c.index]); assert.deepEqual(await active(page), []);
     assert.equal((await haptics(page)).length, 6);
     return { popped: await popped(page) };
   });
   await check('two fingers cannot steal a pocket or cancel each other during a crossing', async () => {
     const { ctx, page } = await context({ hold: .4, isMobile: true, hasTouch: true });
     const cdp = await ctx.newCDPSession(page);
-    const a = await pocket(page, 4), b = await pocket(page, 5), c = await pocket(page, 6);
+    const [a, b, c] = await adjacentPockets(page, 3);
     const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points.map(([id, p]) => ({ id, x: p.x, y: p.y, force: .5 })) });
     await touch('touchStart', [[1, a], [2, b]]);
-    assert.deepEqual(await active(page), [4, 5]);
+    assert.deepEqual(await active(page), [a.index, b.index]);
     await touch('touchMove', [[1, b], [2, b]]);
-    assert.deepEqual(await active(page), [5]);
+    assert.deepEqual(await active(page), [b.index]);
     await touch('touchMove', [[1, c], [2, b]]);
-    assert.deepEqual(await active(page), [5, 6]);
-    await page.waitForFunction(() => __bubbleStates[5].popped && __bubbleStates[6].popped);
+    assert.deepEqual(await active(page), [b.index, c.index]);
+    await page.waitForFunction(indices => indices.every(index => __bubbleStates[index].popped), [b.index, c.index]);
     await touch('touchCancel', []); assert.deepEqual(await active(page), []);
-    assert.deepEqual(await popped(page), [5, 6]);
+    assert.deepEqual(await popped(page), [b.index, c.index]);
   });
   await check('cancelled and reduced-effect contacts never emit a later pop pulse', async () => {
     const { ctx, page } = await context({ isMobile: true, hasTouch: true, hold: .4 });

@@ -46,14 +46,14 @@ export const BURST_CONFIG = freeze({
 });
 
 export const LAYOUT_CONFIG = freeze({
-  rowCounts: freeze([3, 4, 3, 4]),
   maximumFilmScale: 1.085 * 1.05,
   filmGap: 4,
   stagePadding: 20,
   fallbackViewportWidth: 390,
-  minimumStageWidth: 120,
-  viewportInset: 12,
+  fallbackViewportHeight: 680,
   defaultBubbleDiameter: 84,
+  compactColumns: 4,
+  minimumCompactDiameter: 44,
 });
 
 export const SHEET_CONFIG = freeze({
@@ -113,8 +113,6 @@ export const APP_CONFIG = freeze({
   tiltWakeSeconds: 0.7,
   pointerLightWakeSeconds: 0.55,
   maximumDevicePixelRatio: 2.5,
-  desktopFieldPadding: 24,
-  mobileBreakpoint: 540,
   pointerLightShift: 0.055,
   hapticPressMilliseconds: 5,
   hapticPopMilliseconds: 12,

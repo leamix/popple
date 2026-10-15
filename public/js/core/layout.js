@@ -1,38 +1,59 @@
 import { LAYOUT_CONFIG } from './config.js';
 
-export const ROW_COUNTS = LAYOUT_CONFIG.rowCounts;
-export const BUBBLE_COUNT = ROW_COUNTS.reduce((sum, count) => sum + count, 0);
-
 // The welded rim extends beyond the hit target. Reserve space for that rim
 // and the widest pressed shape, including two adjacent pockets being pressed.
 export const MAX_FILM_SCALE = LAYOUT_CONFIG.maximumFilmScale;
 export const FILM_GAP = LAYOUT_CONFIG.filmGap;
 export const STAGE_PADDING = LAYOUT_CONFIG.stagePadding;
 
-/** A centred hexagonal packing; all returned measurements are CSS pixels. */
-export function createBubbleLayout(viewportWidth, requestedDiameter = LAYOUT_CONFIG.defaultBubbleDiameter) {
-  const viewport = Number.isFinite(viewportWidth) && viewportWidth > 0 ? viewportWidth : LAYOUT_CONFIG.fallbackViewportWidth;
+// Fractional CSS widths can put an exact capacity just below its integer.
+const completeFits = ratio => Math.floor(ratio + Number.EPSILON * Math.max(1, Math.abs(ratio)) * 8);
+
+/** Fill the available rectangle with centred rows; measurements are CSS pixels. */
+export function createBubbleLayout(
+  viewportWidth,
+  requestedDiameter = LAYOUT_CONFIG.defaultBubbleDiameter,
+  availableHeight = LAYOUT_CONFIG.fallbackViewportHeight,
+) {
+  const width = Number.isFinite(viewportWidth) && viewportWidth > 0
+    ? viewportWidth : LAYOUT_CONFIG.fallbackViewportWidth;
+  const height = Number.isFinite(availableHeight) && availableHeight > 0
+    ? availableHeight : LAYOUT_CONFIG.fallbackViewportHeight;
   const desiredDiameter = Number.isFinite(requestedDiameter) && requestedDiameter > 0
     ? requestedDiameter : LAYOUT_CONFIG.defaultBubbleDiameter;
-  const columns = Math.max(...ROW_COUNTS);
-  const preferredWidth = STAGE_PADDING * 2 + columns * desiredDiameter * MAX_FILM_SCALE + (columns - 1) * FILM_GAP;
-  const width = Math.min(preferredWidth, Math.max(LAYOUT_CONFIG.minimumStageWidth, viewport - LAYOUT_CONFIG.viewportInset));
-  const diameter = Math.min(desiredDiameter,
-    (width - STAGE_PADDING * 2 - (columns - 1) * FILM_GAP) / (columns * MAX_FILM_SCALE));
+  // Sub-40px regions cannot retain the normal padding and a positive bubble.
+  const smallestSide = Math.min(width, height);
+  const padding = smallestSide <= STAGE_PADDING * 2 ? smallestSide / 4 : STAGE_PADDING;
+  const innerWidth = width - padding * 2;
+  const innerHeight = height - padding * 2;
+  // Retain the familiar compact density without forcing tiny hit targets when
+  // fewer than four useful pockets can fit across a genuinely narrow region.
+  const compactPitch = LAYOUT_CONFIG.minimumCompactDiameter * MAX_FILM_SCALE + FILM_GAP;
+  const compactColumns = Math.max(1, Math.min(LAYOUT_CONFIG.compactColumns,
+    completeFits((innerWidth + FILM_GAP) / compactPitch)));
+  const compactDiameter = (innerWidth - (compactColumns - 1) * FILM_GAP)
+    / (compactColumns * MAX_FILM_SCALE);
+  const diameter = Math.min(desiredDiameter, compactDiameter, innerHeight / MAX_FILM_SCALE);
   const radius = diameter / 2;
   const visualRadius = radius * MAX_FILM_SCALE;
   const pitch = diameter * MAX_FILM_SCALE + FILM_GAP;
-  const rowPitch = pitch * Math.sqrt(3) / 2;
-  const height = STAGE_PADDING * 2 + visualRadius * 2 + (ROW_COUNTS.length - 1) * rowPitch;
-  const layout = ROW_COUNTS.flatMap((count, row) => {
+  const columns = Math.max(1, completeFits((innerWidth + FILM_GAP) / pitch));
+  // A single column has no diagonal offset, so it needs the full separation.
+  const rowPitch = columns === 1 ? pitch : pitch * Math.sqrt(3) / 2;
+  const rows = Math.max(1, completeFits((innerHeight - visualRadius * 2) / rowPitch) + 1);
+  const packedHeight = visualRadius * 2 + (rows - 1) * rowPitch;
+  const startY = (height - packedHeight) / 2 + visualRadius;
+  const layout = Array.from({ length: rows }, (_, row) => {
+    // One row can use every column without needing a staggered neighbour.
+    const count = rows === 1 || columns === 1 || row % 2 === 1 ? columns : columns - 1;
     const startX = width / 2 - (count - 1) * pitch / 2;
     return Array.from({ length: count }, (_, column) => ({
       x: startX + column * pitch,
-      y: STAGE_PADDING + visualRadius + row * rowPitch,
+      y: startY + row * rowPitch,
       radius,
       row,
       column,
     }));
-  });
+  }).flat();
   return { width, height, diameter, pitch, rowPitch, visualRadius, layout };
 }

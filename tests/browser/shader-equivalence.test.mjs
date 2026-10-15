@@ -305,7 +305,7 @@ try {
           };
           for (const [index, scene] of scenes.entries()) for (const dark of [false, true]) fixtures.push({
             scene, dark, light: lights[(index + Number(dark) + Math.round(dpr * 4)) % lights.length],
-            geometry: originalGeometry, geometryName: 'original-14',
+            geometry: originalGeometry, geometryName: 'adaptive-viewport',
           });
           for (const count of counts) for (const dark of [false, true]) fixtures.push({
             scene: 'mixed-collapse', dark, light: lights[Number(dark)], geometry: stressGeometry(count, false), geometryName: `fit-${count}`,
