@@ -106,6 +106,7 @@ export const MEMBRANE_CONFIG = freeze({
 
 export const APP_CONFIG = freeze({
   burstPadding: 80,
+  resetTapSlopPixels: 12,
   wakeSeconds: 0.9,
   popWakeSeconds: 1.1,
   themeWakeSeconds: 0.4,

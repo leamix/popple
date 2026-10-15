@@ -24,6 +24,7 @@ const pointers=new Map();
 const rawTouchEvents='ontouchstart' in window;
 const activationTimers=new Map();
 const keyboardOwners=new Map();
+let resetTouch=null;
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
 const burstPadding=APP_CONFIG.burstPadding;
 let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
@@ -125,6 +126,7 @@ function cancelBubble(index) {
   keyboardOwners.delete(index);bubbles[index].release();
 }
 function cancelAll() {
+  resetTouch=null;
   bubbles.forEach((_,index)=>cancelBubble(index));
   for(const pointerId of pointers.keys())releasePointer(pointerId);
   wake();
@@ -280,7 +282,8 @@ document.addEventListener('pointermove',event=>{
 document.addEventListener('selectstart',event=>event.preventDefault());
 document.addEventListener('dragstart',event=>event.preventDefault());
 $('#theme').addEventListener('click',()=>{audio.unlock();dark=!dark;setTheme();});
-$('#reset').addEventListener('click',()=>{
+const resetButton=$('#reset');
+function resetFilm() {
   audio.unlock();cancelAll();effects.clear();
   refillBubbles(bubbles,{reduced});
   poppedCount=bubbles.filter(b=>b.popped).length;
@@ -288,7 +291,48 @@ $('#reset').addEventListener('click',()=>{
   buttons.forEach((_,i)=>updateBubbleButton(i));
   advanceBrandAccent();
   $('#announcement').textContent=bubbles.some(b=>b.refilling)?'Пузырьки надуваются.':`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
-});
+}
+resetButton.addEventListener('click',resetFilm);
+
+// Use the original touch position rather than waiting for a compatibility
+// click. Mobile browsers can deliver that click to the previous native switch.
+function withinResetBounds(touch,rect) {
+  return touch.clientX>=rect.left&&touch.clientX<=rect.right&&touch.clientY>=rect.top&&touch.clientY<=rect.bottom;
+}
+document.addEventListener('touchstart',event=>{
+  if(resetTouch)return;
+  const bounds=resetButton.getBoundingClientRect();
+  for(const touch of event.changedTouches) {
+    if(!withinResetBounds(touch,bounds)||!resetButton.contains(document.elementFromPoint(touch.clientX,touch.clientY)))continue;
+    resetTouch={id:touch.identifier,x:touch.clientX,y:touch.clientY,bounds,cancelled:false};
+    if(!resetButton.contains(touch.target)) {
+      // Do not let a retargeted touch reach or toggle the haptic switch.
+      event.preventDefault();event.stopPropagation();
+    }
+    break;
+  }
+},{capture:true,passive:false});
+document.addEventListener('touchmove',event=>{
+  if(!resetTouch)return;
+  for(const touch of event.changedTouches)if(touch.identifier===resetTouch.id) {
+    if(!withinResetBounds(touch,resetTouch.bounds)
+      ||Math.hypot(touch.clientX-resetTouch.x,touch.clientY-resetTouch.y)>APP_CONFIG.resetTapSlopPixels)resetTouch.cancelled=true;
+  }
+},{capture:true,passive:true});
+function finishResetTouch(event) {
+  if(!resetTouch)return;
+  for(const touch of event.changedTouches)if(touch.identifier===resetTouch.id) {
+    // Keep the original hit area while :active visually shrinks the button.
+    const activate=event.type==='touchend'&&!resetTouch.cancelled&&withinResetBounds(touch,resetTouch.bounds);
+    resetTouch=null;
+    // Suppress the switch's default action and the duplicate generated click.
+    event.preventDefault();event.stopPropagation();
+    if(activate) {resetButton.focus({preventScroll:true});resetFilm();}
+    break;
+  }
+}
+document.addEventListener('touchend',finishResetTouch,{capture:true,passive:false});
+document.addEventListener('touchcancel',finishResetTouch,{capture:true,passive:false});
 audio.setEnabled(storage.get('sound','true')==='true');
 function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
 $('#sound').addEventListener('click',()=>{

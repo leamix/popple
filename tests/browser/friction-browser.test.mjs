@@ -156,7 +156,90 @@ async function soundScenario(targetBrowser = browser) {
   return { intactRms: intact, popRms: pop, heldRms: held, freshRms: fresh };
 }
 let webkitBrowser;
+
+async function firstRefillTouchScenario(targetBrowser = browser) {
+  const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
+  const popOne = async () => {
+    await page.locator('.bubble-target').nth(4).evaluate(button => button.click());
+    await waitPopped(page, 4);
+  };
+  const gesture = async ({ retargeted = false, cancel = false, moveAway = false, moveInside = false, blur = false } = {}) => page.evaluate(options => {
+    const button = document.querySelector('#reset'), bounds = button.getBoundingClientRect();
+    const target = options.retargeted
+      ? document.querySelectorAll('.bubble-haptic')[4] ?? document.querySelectorAll('.bubble-target')[4]
+      : button.querySelector('span');
+    const touch = { identifier: 91, target, clientX: bounds.x + bounds.width / 2, clientY: bounds.y + bounds.height / 2, force: .5 };
+    const dispatch = (type, point = touch) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperties(event, {
+        changedTouches: { value: [point] },
+        touches: { value: type === 'touchend' || type === 'touchcancel' ? [] : [point] },
+      });
+      target.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    const startPrevented = dispatch('touchstart');
+    if (options.moveAway) dispatch('touchmove', { ...touch, clientX: touch.clientX - 80 });
+    if (options.moveInside) dispatch('touchmove', { ...touch, clientX: touch.clientX + 20 });
+    if (options.blur) window.dispatchEvent(new Event('blur'));
+    const endPrevented = dispatch(options.cancel ? 'touchcancel' : 'touchend');
+    return { startPrevented, endPrevented, refilling: __bubbleStates[4].refilling };
+  }, { retargeted, cancel, moveAway, moveInside, blur });
+
+  await popOne();
+  const redirected = await gesture({ retargeted: true });
+  assert.equal(redirected.refilling, true, 'a first raw touch over «ещё» must not be lost to the native haptic target');
+  assert.equal(redirected.startPrevented, true, 'cancel the wrongly targeted native switch');
+  assert.equal(redirected.endPrevented, true, 'suppress its compatibility click');
+  await page.waitForFunction(() => !__bubbleStates[4].popped);
+
+  await popOne();
+  const direct = await gesture();
+  assert.equal(direct.refilling, true, 'a direct touch must work without waiting for a synthesized click');
+  assert.equal(direct.endPrevented, true, 'one touch must not activate the button twice');
+  await page.waitForFunction(() => !__bubbleStates[4].popped);
+
+  await popOne();
+  assert.equal((await gesture({ cancel: true })).refilling, false);
+  assert.equal((await gesture({ moveAway: true })).refilling, false, 'a dragged-away touch must not become a tap');
+  assert.equal((await gesture({ moveInside: true })).refilling, false, 'a swipe staying inside the button must not become a tap');
+  assert.equal((await gesture({ blur: true })).refilling, false, 'losing focus must cancel the pending control gesture');
+  const native = await page.locator('.bubble-haptic').count();
+  await page.locator('.bubble-target').nth(4).focus();
+  const point = await pocket(page, 4);
+  if (native) await page.touchscreen.tap(point.x, point.y);
+  const accent = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+  await page.evaluate(() => {
+    window.__resetAccentWrites = [];
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === sessionStorage && key === 'bubble.brandAccent') __resetAccentWrites.push(value);
+      return setItem.call(this, key, value);
+    };
+  });
+  await page.locator('#reset').tap();
+  assert.ok(await page.evaluate(() => __bubbleStates[4].refilling), 'the first trusted tap must start inflation');
+  assert.equal(await page.evaluate(() => document.activeElement.id), 'reset');
+  const nextAccent = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+  assert.notEqual(nextAccent, accent);
+  await page.waitForTimeout(120);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent')), nextAccent);
+  assert.equal(await page.evaluate(() => __resetAccentWrites.length), 1, 'one trusted touch must perform only one refill action');
+  return { nativeHapticTargets: native, redirected, direct };
+}
+
 try {
+  await check('first refill touch works even when click is lost or retargeted', () => firstRefillTouchScenario());
+  await check('first refill touch at the button edge survives its pressed animation', async () => {
+    const { ctx, page } = await context({ isMobile: true, hasTouch: true });
+    await page.locator('.bubble-target').nth(4).evaluate(button => button.click()); await waitPopped(page, 4);
+    const bounds = await page.locator('#reset').boundingBox();
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ id: 1, x: bounds.x + 1, y: bounds.y + bounds.height / 2, force: .5 }] });
+    await page.waitForTimeout(220);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    assert.ok(await page.evaluate(() => __bubbleStates[4].refilling), 'pressed CSS shrink must not invalidate the original tap');
+  });
   await check('refill overlaps random starts, preserves intact pockets and survives repeated clicks', async () => {
     const { page } = await context({ viewport: { width: 1000, height: 800 } });
     await page.locator('.bubble-target').evaluateAll(buttons => buttons.slice(1).forEach(button => button.click()));
@@ -381,6 +464,7 @@ try {
     const { webkit } = await import(pathToFileURL(path.join(webkitPackage, 'index.mjs')));
     webkitBrowser = await webkit.launch({ headless: true });
     report.browsers.webkit = webkitBrowser.version();
+    await check('WebKit first refill touch bypasses the native haptic target', () => firstRefillTouchScenario(webkitBrowser));
     await check('WebKit rubbing is silent while the pop remains audible', () => soundScenario(webkitBrowser));
     await check('iOS native haptic target accepts a trusted tap only inside the circle', async () => {
       const { page } = await context({ isMobile: true, hasTouch: true }, webkitBrowser);
