@@ -15,7 +15,7 @@
 * { box-sizing: border-box; }
 html { height: 100%; overflow: hidden; overscroll-behavior: none; background: var(--bg); -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 html[data-theme="light"] { color-scheme: light; --bg: #dcebf4; --text: #273942; --muted: #536b78; --line: #36576b28; --surface: #ffffff60; --accent: #426948; --panel: #edf5fa; }
-body { position: fixed; inset: var(--app-top, 0px) 0 auto; margin: 0; min-width: 280px; height: 100svh; height: 100dvh; height: var(--app-height, 100dvh); padding-bottom: env(safe-area-inset-bottom); display: flex; flex-direction: column; overflow: hidden; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; background: radial-gradient(ellipse at 50% 44%, #17202755, transparent 60%); }
+body { position: fixed; top: var(--app-top, 0px); left: var(--app-left, 0px); margin: 0; width: var(--app-width, 100%); min-width: min(280px, var(--app-width, 100%)); height: 100svh; height: 100dvh; height: var(--app-height, 100dvh); padding-bottom: env(safe-area-inset-bottom); display: flex; flex-direction: column; overflow: hidden; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; background: radial-gradient(ellipse at 50% 44%, #17202755, transparent 60%); }
 html[data-theme="light"] body { background: radial-gradient(ellipse at 50% 44%, #ffffff28, transparent 65%); }
 button, input { font: inherit; }
 button, a, input { -webkit-tap-highlight-color: transparent; }

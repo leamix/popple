@@ -471,24 +471,67 @@ try {
     await probe.evaluate(() => { visualViewport.height = 780; visualViewport.dispatchEvent(new Event('resize')); });
     await probe.waitForFunction(() => Math.abs(document.querySelector('.playground').getBoundingClientRect().bottom - 780) < 1);
     const expanded = await inspectViewportField(probe);
-    await probe.evaluate(() => { visualViewport.height = 390; visualViewport.scale = 2; visualViewport.dispatchEvent(new Event('resize')); });
-    await probe.waitForTimeout(120);
-    const zoomed = await probe.locator('.playground').boundingBox();
-    assert.ok(Math.abs(zoomed.y + zoomed.height - 780) < 1, 'Pinch zoom must not repack the field to the zoomed visual height.');
-    await probe.evaluate(() => { visualViewport.height = 720; visualViewport.scale = 1; visualViewport.dispatchEvent(new Event('resize')); });
+    await probe.evaluate(() => {
+      Object.assign(visualViewport, { width: 348, height: 690, offsetLeft: 18, offsetTop: 30, scale: 1.12 });
+      visualViewport.dispatchEvent(new Event('resize'));
+    });
+    await probe.waitForFunction(() => Math.abs(document.querySelector('.playground').getBoundingClientRect().width - 348) < 1);
+    const zoomed = await probe.evaluate(() => {
+      const stage = document.querySelector('.playground').getBoundingClientRect();
+      const header = document.querySelector('.topbar').getBoundingClientRect();
+      const controls = document.querySelector('.topbar-actions').getBoundingClientRect();
+      return { stage: { left: stage.left, right: stage.right, bottom: stage.bottom },
+        header: { top: header.top, left: header.left }, controls: { right: controls.right } };
+    });
+    assert.ok(Math.abs(zoomed.stage.left - 18) < 1 && Math.abs(zoomed.stage.right - 366) < 1);
+    assert.ok(Math.abs(zoomed.stage.bottom - 720) < 1, 'The film fits the zoomed visual viewport.');
+    assert.ok(zoomed.header.top >= 30 && zoomed.header.left >= 18 && zoomed.controls.right <= 366,
+      'The logo and controls remain inside the zoomed visual viewport.');
+    await inspectMobileFieldSpacing(probe);
+    await screenshot(probe, 'mobile-spacing-zoomed-viewport.png');
+    await probe.evaluate(() => {
+      Object.assign(visualViewport, { width: innerWidth, height: 720, offsetLeft: 0, offsetTop: 0, scale: 1 });
+      visualViewport.dispatchEvent(new Event('resize'));
+    });
     await probe.waitForFunction(() => Math.abs(document.querySelector('.playground').getBoundingClientRect().bottom - 720) < 1);
     await probe.addStyleTag({ content: '@media (max-width: 540px) { .topbar { padding-top: 58px; height: 136px; } }' });
     await probe.waitForTimeout(120);
     const safeArea = await inspectViewportField(probe);
     await inspectMobileFieldSpacing(probe);
     await screenshot(probe, 'mobile-spacing-browser-chrome-safe-area.png');
-    return { initial, expanded, safeArea };
+    return { initial, expanded, zoomed, safeArea };
   });
   await check('mobile header stays visible after root scroll, focus reveal and visual viewport offset', async () => {
     const { page: probe } = await context({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, initScript: mockVisualViewport });
     const details = await inspectHeaderViewportStability(probe);
     await screenshot(probe, 'mobile-header-browser-scroll-offset.png');
     return details;
+  });
+  await check('real mobile pinch zoom keeps the header and film edges in view', async () => {
+    const { ctx: probeContext, page: probe } = await context({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const cdp = await probeContext.newCDPSession(probe);
+    try {
+      await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1.12 });
+      await probe.waitForFunction(() => visualViewport.scale > 1.1
+        && Math.abs(document.querySelector('.playground').getBoundingClientRect().width - visualViewport.width) < 1);
+      const geometry = await probe.evaluate(() => {
+        const stage = document.querySelector('.playground').getBoundingClientRect();
+        const header = document.querySelector('.topbar').getBoundingClientRect();
+        const actions = document.querySelector('.topbar-actions').getBoundingClientRect();
+        return { scale: visualViewport.scale, visualWidth: visualViewport.width, visualTop: visualViewport.offsetTop,
+          stage: { left: stage.left, right: stage.right, bottom: stage.bottom },
+          header: { top: header.top, left: header.left }, actionsRight: actions.right };
+      });
+      assert.ok(geometry.header.top >= geometry.visualTop - .5);
+      assert.ok(geometry.header.left >= geometry.stage.left - .5 && geometry.actionsRight <= geometry.stage.right + .5);
+      await inspectMobileFieldSpacing(probe);
+      await screenshot(probe, 'mobile-spacing-real-pinch-zoom.png');
+      return geometry;
+    } finally {
+      await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+      await cdp.detach();
+      await probeContext.close();
+    }
   });
   await check('adaptive resize preserves popped identities, restores hidden edge cells and adds new cells', async () => {
     const { page: probe } = await context({ viewport: { width: 1100, height: 800 } });

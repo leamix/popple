@@ -159,15 +159,22 @@ let resizePending=false,lastGeometry='';
 const cellKey=p=>`${p.row}:${p.column}`;
 function updateViewportHeight() {
   const viewport=window.visualViewport;
-  // Browser chrome can leave dvh taller than the visible viewport. Pinch zoom
-  // changes the visual viewport too, but must keep the existing sheet layout.
-  if(viewport&&Math.abs(viewport.scale-1)>.01)return;
-  const height=Math.min(window.innerHeight,viewport?.height??window.innerHeight);
+  // Keep the whole game in view when Safari zooms or moves its browser chrome.
+  // The visual viewport is smaller than the layout viewport during pinch zoom.
+  const zoomed=viewport&&Math.abs(viewport.scale-1)>.01;
+  const height=zoomed?viewport.height:Math.min(window.innerHeight,viewport?.height??window.innerHeight);
   if(Number.isFinite(height)&&height>0) {
     const top=Number.isFinite(viewport?.offsetTop)?Math.max(0,viewport.offsetTop):0;
+    const left=zoomed&&Number.isFinite(viewport.offsetLeft)?Math.max(0,viewport.offsetLeft):0;
+    const width=zoomed&&Number.isFinite(viewport.width)?Math.min(window.innerWidth,viewport.width):window.innerWidth;
     const style=document.documentElement.style,value=height+'px',offset=top+'px';
     if(style.getPropertyValue('--app-height')!==value)style.setProperty('--app-height',value);
     if(style.getPropertyValue('--app-top')!==offset)style.setProperty('--app-top',offset);
+    if(Number.isFinite(width)&&width>0) {
+      const extent=width+'px',origin=left+'px';
+      if(style.getPropertyValue('--app-width')!==extent)style.setProperty('--app-width',extent);
+      if(style.getPropertyValue('--app-left')!==origin)style.setProperty('--app-left',origin);
+    }
   }
 }
 function resize() {
