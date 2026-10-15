@@ -223,7 +223,10 @@ export class BubbleBatch {
           if (membrane !== this.membranes[visible]) {
             packMembraneRow(this.membraneData, visible * MEMBRANE_STRIDE, membrane);
             this.membranes[visible] = membrane;
-            page.version++;
+            // An intact cap never reads its old GPU row. Clear the CPU cache
+            // without reuploading the page just because a refill has finished.
+            // A later rupture or page switch uploads the current rows as usual.
+            if (membrane) page.version++;
           }
           // Match heightAt's branch. A popped cap before venting progresses
           // caches its eventual folds without making the GPU upload them yet.

@@ -53,6 +53,10 @@ assert.notEqual(appSource, appInstrumented);
 const physicsSource = await readFile(path.join(root, 'public/js/core/physics.js'), 'utf8');
 const physicsInstrumented = physicsSource.replace('this.reset();', 'this.reset(); (globalThis.__bubbleStates ??= []).push(this);');
 assert.notEqual(physicsSource, physicsInstrumented);
+const rendererSource = await readFile(path.join(root, 'public/js/rendering/renderer.js'), 'utf8');
+const rendererInstrumented = rendererSource.replace('render(bubbles,layout,dark,time,light) {',
+  'render(bubbles,layout,dark,time,light) { globalThis.__interactionRenderer=this;');
+assert.notEqual(rendererSource, rendererInstrumented);
 const contexts = [];
 async function context(options = {}, targetBrowser = browser) {
   const { hold = .24, ...browserOptions } = options;
@@ -71,6 +75,7 @@ async function context(options = {}, targetBrowser = browser) {
   }, { hold });
   await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
   await ctx.route('**/js/core/physics.js', route => route.fulfill({ contentType: 'text/javascript', body: physicsInstrumented }));
+  await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: rendererInstrumented }));
   const page = await ctx.newPage();
   page.on('pageerror', error => report.errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.errors.push(message.text()); });
@@ -161,6 +166,29 @@ try {
     await page.screenshot({ path: path.join(output, 'refill-before.png') });
     await page.evaluate(() => {
       window.__refillSamples = [];
+      const renderer = __interactionRenderer, gl = renderer.gl;
+      window.__refillGpu = { capTextureUploads: 0, bufferAllocations: 0, textureAllocations: 0, draws: 0, frameDraws: [] };
+      const upload = gl.texSubImage2D.bind(gl);
+      gl.texSubImage2D = (...args) => {
+        if (gl.getParameter(gl.TEXTURE_BINDING_2D) === renderer.batch.texture) __refillGpu.capTextureUploads++;
+        return upload(...args);
+      };
+      for (const [method, counter] of [['bufferData', 'bufferAllocations'], ['texImage2D', 'textureAllocations'], ['drawArrays', 'draws']]) {
+        const original = gl[method].bind(gl);
+        gl[method] = (...args) => { __refillGpu[counter]++; return original(...args); };
+      }
+      const angle = gl.getExtension('ANGLE_instanced_arrays');
+      if (angle) {
+        const draw = angle.drawArraysInstancedANGLE.bind(angle);
+        angle.drawArraysInstancedANGLE = (...args) => { __refillGpu.draws++; return draw(...args); };
+      }
+      const render = renderer.render.bind(renderer);
+      renderer.render = (...args) => {
+        const before = __refillGpu.draws;
+        const result = render(...args);
+        __refillGpu.frameDraws.push(__refillGpu.draws - before);
+        return result;
+      };
       document.querySelector('#reset').addEventListener('click', () => {
         if (__refillSamples.length) return;
         const start = performance.now();
@@ -185,17 +213,21 @@ try {
     assert.equal(await page.locator('[aria-busy="true"]').count(), 0);
     assert.equal(await page.locator('[aria-disabled="true"]').count(), 0);
     const samples = await page.evaluate(() => __refillSamples);
-    assert.ok(samples.at(-1).time >= 1.5 && samples.at(-1).time < 2.25,
+    assert.ok(samples.at(-1).time >= 1 && samples.at(-1).time < 1.75,
       `whole refill took ${samples.at(-1).time}s, including frame delivery`);
     const starts = Array.from({ length: 13 }, (_, i) => samples.find(sample => sample.states[i + 1].collapse < .99).time).sort((a, b) => a - b);
     const firstFinish = samples.find(sample => sample.states.slice(1).some(b => !b.refilling)).time;
     assert.ok(starts.at(-1) - starts[0] > .2);
     assert.ok(starts.at(-1) < firstFinish, 'later pockets start before the first completes');
     assert.ok(samples.every(sample => sample.states[0].seed === intact.seed && sample.states[0].collapse === intact.collapse));
+    const gpu = await page.evaluate(() => __refillGpu);
+    assert.equal(gpu.capTextureUploads, 0, 'inflation and completion reuse existing wrinkle texture data');
+    assert.equal(gpu.bufferAllocations, 0); assert.equal(gpu.textureAllocations, 0);
+    assert.ok(gpu.frameDraws.length > 1 && gpu.frameDraws.every(draws => draws === 2), 'one sheet draw and one cap draw per frame');
     const a = await pocket(page, 4);
     await page.mouse.move(a.x, a.y); await page.mouse.down(); await waitPopped(page, 4); await page.mouse.up();
     assert.deepEqual(await popped(page), [4], 'restored bubbles remain playable');
-    return { seconds: samples.at(-1).time, starts, firstFinish };
+    return { seconds: samples.at(-1).time, starts, firstFinish, gpu };
   });
   await check('refill in reduced motion is immediate and toggling it finishes an animation', async () => {
     const { page } = await context();
@@ -229,6 +261,34 @@ try {
     await button.focus(); await page.keyboard.down('Space');
     await waitPopped(page, 4); await page.keyboard.up('Space');
     assert.deepEqual(await popped(page), [4]);
+  });
+  await check('refill pauses while hidden and stops drawing after the final frame', async () => {
+    const { page } = await context();
+    await page.evaluate(() => {
+      window.__refillRenderCount = 0;
+      const renderer = __interactionRenderer, render = renderer.render.bind(renderer);
+      renderer.render = (...args) => { __refillRenderCount++; return render(...args); };
+    });
+    await page.locator('.bubble-target').evaluateAll(buttons => buttons.forEach(button => button.click()));
+    await page.waitForFunction(() => __bubbleStates.every(b => b.popped));
+    await page.locator('#reset').click(); await page.waitForTimeout(120);
+    const paused = await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+      return { collapse: __bubbleStates.map(b => b.collapse), frames: __refillRenderCount };
+    });
+    await page.waitForTimeout(300);
+    assert.deepEqual(await page.evaluate(() => ({ collapse: __bubbleStates.map(b => b.collapse), frames: __refillRenderCount })), paused);
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { configurable: true, value: false });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.waitForFunction(() => __bubbleStates.every(b => !b.refilling && !b.popped));
+    await page.waitForTimeout(1100);
+    const finishedFrames = await page.evaluate(() => __refillRenderCount);
+    await page.waitForTimeout(200);
+    assert.equal(await page.evaluate(() => __refillRenderCount), finishedFrames, 'the animation must return to idle');
+    return { pausedFrames: paused.frames, finishedFrames };
   });
   await check('intact and popped rubbing are silent while pop remains audible', () => soundScenario());
   await check('background and outside-circle retargeted presses do not pop or vibrate', async () => {

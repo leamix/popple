@@ -20,15 +20,15 @@ function refill(bubbles, options) {
   return physics.refillBubbles(bubbles, options);
 }
 
-test('refills start at varied overlapping times and all finish in 1.5–2 seconds', () => {
+test('refills start at varied overlapping times and all finish in 1–1.5 seconds', () => {
   for (const count of [1, 2, 7, 14]) for (const frequency of [30, 60, 120]) {
     const bubbles = Array.from({ length: count }, (_, index) => poppedBubble(index));
     const duration = refill(bubbles, { random: randomFor(count + frequency) });
-    assert.ok(duration >= 1.5 && duration <= 2);
+    assert.ok(duration >= 1 && duration <= 1.5);
     assert.ok(bubbles.every(b => b.popped && b.refilling));
     const starts = new Map(), finishes = new Map();
     let events = 0;
-    for (let frame = 1; frame <= Math.ceil(2.05 * frequency); frame++) {
+    for (let frame = 1; frame <= Math.ceil(1.55 * frequency); frame++) {
       const time = frame / frequency;
       for (const b of bubbles) {
         events += Number(b.step(1 / frequency));
@@ -40,7 +40,7 @@ test('refills start at varied overlapping times and all finish in 1.5–2 second
     const orderedFinishes = [...finishes.values()].sort((a, b) => a - b);
     assert.equal(starts.size, count);
     assert.equal(finishes.size, count);
-    assert.ok(orderedFinishes.at(-1) >= 1.5 && orderedFinishes.at(-1) <= 2 + 1 / frequency);
+    assert.ok(orderedFinishes.at(-1) >= 1 && orderedFinishes.at(-1) <= 1.5 + 1 / frequency);
     if (count > 1) {
       assert.ok(orderedStarts.at(-1) > orderedStarts[0] + .2, 'starts must be visibly staggered');
       assert.ok(orderedStarts.at(-1) < orderedFinishes[0], 'next pockets inflate before earlier ones finish');
@@ -55,19 +55,19 @@ test('inflation smoothly unfolds the existing film, ignores presses and does not
   refill([b], { random: () => .5 });
   const collapse = b.collapse, compression = b.compression;
   assert.equal(b.press(-.7, .2), false, 'a partly inflated pocket cannot pop');
-  b.step(.1);
+  b.step(.05);
   assert.ok(b.collapse < collapse && b.collapse > .9);
   assert.ok(b.compression < compression);
   const afterFirstFrame = b.collapse;
   refill([b], { random: () => .1 });
   assert.equal(b.collapse, afterFirstFrame, 'another click must keep current progress');
-  for (let frame = 0; frame < 16; frame++) {
+  for (let frame = 0; frame < 23; frame++) {
     const previous = b.collapse;
-    b.step(.1);
+    b.step(.05);
     assert.ok(b.collapse <= previous && b.collapse >= 0);
     assert.deepEqual([b.popX, b.popY], contact, 'wrinkles retain their contact until completely unfolded');
   }
-  b.step(.1);
+  b.step(.06);
   assert.equal(b.refilling, false);
   assert.equal(b.seed, seed, 'identity must not jump at either end of inflation');
   assert.equal(b.press(0, 0), true);
@@ -102,9 +102,9 @@ test('reset or enabling reduced motion completes a pending refill without a late
 test('slow foreground frames catch up to the refill deadline without accelerating a hold', () => {
   const b = poppedBubble();
   refill([b], { random: () => .5 });
-  b.step(.8);
+  b.step(.5);
   assert.ok(b.refilling && b.collapse > 0 && b.collapse < 1);
-  b.step(.95);
+  b.step(.75);
   assert.ok(!b.refilling && !b.popped && b.collapse === 0);
   b.press(0, 0);
   assert.equal(b.step(1.75), false);

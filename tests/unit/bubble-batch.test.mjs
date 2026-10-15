@@ -177,6 +177,27 @@ test('cached arrays and upload views survive frames; fold data is repacked only 
   assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[60], .25);
 });
 
+test('finishing individual refills does not upload unread wrinkle rows while other pockets stay collapsed', () => {
+  const gl = mockGL(), batch = new BubbleBatch(gl);
+  const states = Array.from({ length: 3 }, (_, index) => ({ ...bubble(index), popped: true, collapse: 1 }));
+  const layout = lattice(3), shapes = states.map((_, index) => membrane((index + 1) / 8));
+  const getMembrane = (_, index) => shapes[index];
+  render(batch, states, layout, geometry(), undefined, getMembrane);
+  const uploaded = selectedCalls(gl, 'texSubImage2D').length;
+  for (let index = 0; index < 2; index++) {
+    states[index].popped = false; states[index].collapse = 0;
+    render(batch, states, layout, geometry(), undefined, getMembrane);
+    assert.equal(selectedCalls(gl, 'texSubImage2D').length, uploaded,
+      'the remaining popped cap can keep sampling its unchanged GPU row');
+    assert.ok(batch.membraneData.slice(index * 60, (index + 1) * 60).every(value => value === 0));
+  }
+  states[0].popped = true; states[0].collapse = .3;
+  shapes[0] = membrane(.75);
+  render(batch, states, layout, geometry(), undefined, getMembrane);
+  assert.equal(selectedCalls(gl, 'texSubImage2D').length, uploaded + 1, 'a new rupture must upload its fresh folds');
+  assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[0], .75);
+});
+
 test('500 and 1000 popped caps use distinct page rows across bounded vertex chunks and retain all permanent data on the GPU', () => {
   for (const count of [500, 1000]) {
     const gl = mockGL(), batch = new BubbleBatch(gl);

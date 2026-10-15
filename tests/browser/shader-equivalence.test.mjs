@@ -14,6 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const ref = argument('ref') || 'd28325d';
+const referenceMode = argument('reference-mode') || 'reference';
+assert.ok(['reference', 'legacy'].includes(referenceMode), 'Reference may use its normal batching or the independent uniform fallback.');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const origin = new URL(baseURL).origin;
 const maxChannelError = 2;
@@ -90,7 +92,7 @@ const browser = await chromium.launch(browserFlavor === 'chrome-metal'
   ? { headless: true, executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', args: ['--use-angle=metal'] }
   : { headless: true });
 const report = {
-  generatedAt: new Date().toISOString(), reference: ref, browserFlavor, sourceHashes,
+  generatedAt: new Date().toISOString(), reference: ref, referenceMode, browserFlavor, sourceHashes,
   browser: { chromium: browser.version(), playwright: JSON.parse(await readFile(path.join(playwrightPath, 'package.json'), 'utf8')).version },
   comparison: 'Actual reference Git renderer and current renderer; identical frozen current dependencies, seeds, geometry and state; immediate WebGL readPixels on detached canvases; forced instanced, expanded, no-float legacy and feature-disabled sheet paths.',
   profiles, stressCounts: counts, modes,
@@ -109,9 +111,9 @@ try {
       const page = await context.newPage();
       page.on('pageerror', error => report.errors.push({ profile: profile.name, message: error.message }));
       await page.goto(url);
-      const results = await page.evaluate(async ({ currentSource, baselineSource, profile, counts, modes, origin, tolerance }) => {
+      const results = await page.evaluate(async ({ currentSource, baselineSource, profile, counts, modes, origin, tolerance, referenceMode }) => {
         const { dpr } = profile;
-        const [{ BubbleState }, { createBubbleLayout }, { PHYSICS_CONFIG }] = await Promise.all([
+        const [{ BubbleState, refillBubbles }, { createBubbleLayout }, { PHYSICS_CONFIG }] = await Promise.all([
           import(`${origin}/js/core/physics.js`), import(`${origin}/js/core/layout.js`), import(`${origin}/js/core/config.js`),
         ]);
         const moduleURLs = [currentSource, baselineSource].map(source => URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
@@ -193,7 +195,7 @@ try {
         }
         try {
           const modules = await Promise.all(moduleURLs.map(url => import(url)));
-          const referenceCanvas = canvasFor('reference');
+          const referenceCanvas = canvasFor(referenceMode);
           const reference = new modules[1].FilmRenderer(referenceCanvas.canvas);
           referenceCanvas.attach(reference); renderers.push(reference);
           const candidates = modes.map(mode => {
@@ -209,7 +211,8 @@ try {
             renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
             dpr, viewport: { width: profile.width, height: profile.height },
           };
-          const scenes = ['intact', 'offset-press', 'partial-collapse', 'fully-collapsed', 'popped-kneading'];
+          const scenes = ['intact', 'offset-press', 'partial-collapse', 'fully-collapsed', 'popped-kneading',
+            'refill-start', 'refill-middle', 'refill-finishing', 'refill-complete', 'refill-repop'];
           const lights = [
             { name: 'neutral', x: 0, y: 0, angle: 0 },
             { name: 'rotated', x: .22, y: -.16, angle: .71 },
@@ -236,6 +239,18 @@ try {
                 if (kind === 'popped-kneading' && (scene === 'mixed-collapse' || index % 3 === 1)) Object.assign(state, {
                   active: true, x: -.48, y: .36, compression: .23, holdProgress: 1,
                 });
+              }
+            }
+            if (scene.startsWith('refill-')) {
+              let seed = 47;
+              refillBubbles(states, { random: () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296) });
+              const seconds = { 'refill-start': 0, 'refill-middle': .45, 'refill-finishing': .95,
+                'refill-complete': 1.5, 'refill-repop': 1.5 }[scene];
+              for (let frame = 0; frame < Math.round(seconds * 120); frame++) for (const state of states) state.step(1 / 120);
+              if (scene === 'refill-repop') {
+                states[0].press(-.65, .35);
+                for (let frame = 0; frame < 48; frame++) states[0].step(1 / 120);
+                states[0].release();
               }
             }
             return states;
@@ -367,7 +382,7 @@ try {
           }
           for (const url of moduleURLs) URL.revokeObjectURL(url);
         }
-      }, { currentSource: absoluteImports(current), baselineSource: absoluteImports(baseline), profile, counts, modes, origin, tolerance: maxChannelError });
+      }, { currentSource: absoluteImports(current), baselineSource: absoluteImports(baseline), profile, counts, modes, origin, tolerance: maxChannelError, referenceMode });
       report.checks.push({ profile: profile.name, ...results });
       const failed = results.checks.filter(check => check.status !== 'passed');
       console.log(`${failed.length ? 'FAIL' : 'PASS'} ${profile.name}: ${results.checks.length - failed.length}/${results.checks.length} scenes; maximum channel error ${Math.max(...results.checks.map(check => check.maximumChannelError))}/255; ${results.nonfiniteInputs} nonfinite inputs`);
