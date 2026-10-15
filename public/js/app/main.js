@@ -24,7 +24,7 @@ const pointers=new Map();
 const rawTouchEvents='ontouchstart' in window;
 const activationTimers=new Map();
 const keyboardOwners=new Map();
-let resetTouch=null;
+let controlTouch=null;
 const reducedQuery=matchMedia('(prefers-reduced-motion: reduce)');
 const burstPadding=APP_CONFIG.burstPadding;
 let reduced=storage.get('motion',String(reducedQuery.matches))==='true';
@@ -126,7 +126,7 @@ function cancelBubble(index) {
   keyboardOwners.delete(index);bubbles[index].release();
 }
 function cancelAll() {
-  resetTouch=null;
+  controlTouch=null;
   bubbles.forEach((_,index)=>cancelBubble(index));
   for(const pointerId of pointers.keys())releasePointer(pointerId);
   wake();
@@ -293,19 +293,22 @@ function resetFilm() {
   $('#announcement').textContent=bubbles.some(b=>b.refilling)?'Пузырьки надуваются.':`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
 }
 resetButton.addEventListener('click',resetFilm);
+const touchButtons=new Set(['#reset','#theme','#sound','#settings-open','#settings-close'].map($));
 
 // Use the original touch position rather than waiting for a compatibility
 // click. Mobile browsers can deliver that click to the previous native switch.
-function withinResetBounds(touch,rect) {
+function withinControlBounds(touch,rect) {
   return touch.clientX>=rect.left&&touch.clientX<=rect.right&&touch.clientY>=rect.top&&touch.clientY<=rect.bottom;
 }
 document.addEventListener('touchstart',event=>{
-  if(resetTouch)return;
-  const bounds=resetButton.getBoundingClientRect();
+  if(controlTouch)return;
   for(const touch of event.changedTouches) {
-    if(!withinResetBounds(touch,bounds)||!resetButton.contains(document.elementFromPoint(touch.clientX,touch.clientY)))continue;
-    resetTouch={id:touch.identifier,x:touch.clientX,y:touch.clientY,bounds,cancelled:false};
-    if(!resetButton.contains(touch.target)) {
+    const button=document.elementFromPoint(touch.clientX,touch.clientY)?.closest('button');
+    if(!touchButtons.has(button)||button.disabled)continue;
+    const bounds=button.getBoundingClientRect();
+    if(!withinControlBounds(touch,bounds))continue;
+    controlTouch={button,id:touch.identifier,x:touch.clientX,y:touch.clientY,bounds,cancelled:false};
+    if(!button.contains(touch.target)) {
       // Do not let a retargeted touch reach or toggle the haptic switch.
       event.preventDefault();event.stopPropagation();
     }
@@ -313,26 +316,27 @@ document.addEventListener('touchstart',event=>{
   }
 },{capture:true,passive:false});
 document.addEventListener('touchmove',event=>{
-  if(!resetTouch)return;
-  for(const touch of event.changedTouches)if(touch.identifier===resetTouch.id) {
-    if(!withinResetBounds(touch,resetTouch.bounds)
-      ||Math.hypot(touch.clientX-resetTouch.x,touch.clientY-resetTouch.y)>APP_CONFIG.resetTapSlopPixels)resetTouch.cancelled=true;
+  if(!controlTouch)return;
+  for(const touch of event.changedTouches)if(touch.identifier===controlTouch.id) {
+    if(!withinControlBounds(touch,controlTouch.bounds)
+      ||Math.hypot(touch.clientX-controlTouch.x,touch.clientY-controlTouch.y)>APP_CONFIG.controlTapSlopPixels)controlTouch.cancelled=true;
   }
 },{capture:true,passive:true});
-function finishResetTouch(event) {
-  if(!resetTouch)return;
-  for(const touch of event.changedTouches)if(touch.identifier===resetTouch.id) {
+function finishControlTouch(event) {
+  if(!controlTouch)return;
+  for(const touch of event.changedTouches)if(touch.identifier===controlTouch.id) {
     // Keep the original hit area while :active visually shrinks the button.
-    const activate=event.type==='touchend'&&!resetTouch.cancelled&&withinResetBounds(touch,resetTouch.bounds);
-    resetTouch=null;
+    const {button}=controlTouch;
+    const activate=event.type==='touchend'&&!controlTouch.cancelled&&withinControlBounds(touch,controlTouch.bounds);
+    controlTouch=null;
     // Suppress the switch's default action and the duplicate generated click.
     event.preventDefault();event.stopPropagation();
-    if(activate) {resetButton.focus({preventScroll:true});resetFilm();}
+    if(activate) {button.focus({preventScroll:true});button.click();}
     break;
   }
 }
-document.addEventListener('touchend',finishResetTouch,{capture:true,passive:false});
-document.addEventListener('touchcancel',finishResetTouch,{capture:true,passive:false});
+document.addEventListener('touchend',finishControlTouch,{capture:true,passive:false});
+document.addEventListener('touchcancel',finishControlTouch,{capture:true,passive:false});
 audio.setEnabled(storage.get('sound','true')==='true');
 function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
 $('#sound').addEventListener('click',()=>{

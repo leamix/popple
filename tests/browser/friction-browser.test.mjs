@@ -157,17 +157,12 @@ async function soundScenario(targetBrowser = browser) {
 }
 let webkitBrowser;
 
-async function firstRefillTouchScenario(targetBrowser = browser) {
-  const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
-  const popOne = async () => {
-    await page.locator('.bubble-target').nth(4).evaluate(button => button.click());
-    await waitPopped(page, 4);
-  };
-  const gesture = async ({ retargeted = false, cancel = false, moveAway = false, moveInside = false, blur = false } = {}) => page.evaluate(options => {
-    const button = document.querySelector('#reset'), bounds = button.getBoundingClientRect();
+async function replayControlTouch(page, selector, { retargeted = false, cancel = false, moveAway = false, moveInside = false, blur = false } = {}) {
+  return page.evaluate(options => {
+    const button = document.querySelector(options.selector), bounds = button.getBoundingClientRect();
     const target = options.retargeted
       ? document.querySelectorAll('.bubble-haptic')[4] ?? document.querySelectorAll('.bubble-target')[4]
-      : button.querySelector('span');
+      : button.querySelector('span,svg') ?? button;
     const touch = { identifier: 91, target, clientX: bounds.x + bounds.width / 2, clientY: bounds.y + bounds.height / 2, force: .5 };
     const dispatch = (type, point = touch) => {
       const event = new Event(type, { bubbles: true, cancelable: true });
@@ -184,7 +179,16 @@ async function firstRefillTouchScenario(targetBrowser = browser) {
     if (options.blur) window.dispatchEvent(new Event('blur'));
     const endPrevented = dispatch(options.cancel ? 'touchcancel' : 'touchend');
     return { startPrevented, endPrevented, refilling: __bubbleStates[4].refilling };
-  }, { retargeted, cancel, moveAway, moveInside, blur });
+  }, { selector, retargeted, cancel, moveAway, moveInside, blur });
+}
+
+async function firstRefillTouchScenario(targetBrowser = browser) {
+  const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
+  const popOne = async () => {
+    await page.locator('.bubble-target').nth(4).evaluate(button => button.click());
+    await waitPopped(page, 4);
+  };
+  const gesture = options => replayControlTouch(page, '#reset', options);
 
   await popOne();
   const redirected = await gesture({ retargeted: true });
@@ -228,7 +232,96 @@ async function firstRefillTouchScenario(targetBrowser = browser) {
   return { nativeHapticTargets: native, redirected, direct };
 }
 
+async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
+  const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
+  await page.locator('.bubble-target').nth(4).evaluate(button => button.click()); await waitPopped(page, 4);
+  await page.locator('.bubble-target').nth(4).focus();
+  if (await page.locator('.bubble-haptic').count()) {
+    const point = await pocket(page, 4); await page.touchscreen.tap(point.x, point.y);
+  }
+  await page.evaluate(() => {
+    window.__controlWrites = [];
+    window.__settingsOpens = 0;
+    const setItem = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === localStorage && ['bubble.theme', 'bubble.sound'].includes(key)) __controlWrites.push({ key, value });
+      return setItem.call(this, key, value);
+    };
+    const showModal = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function() { __settingsOpens++; return showModal.call(this); };
+  });
+  const snapshot = () => page.evaluate(() => ({
+    theme: document.documentElement.dataset.theme,
+    sound: __interactionAudio.enabled,
+    settings: document.querySelector('#settings').open,
+    popped: __bubbleStates.filter(b => b.popped).map(b => b.index),
+    switches: [...document.querySelectorAll('.bubble-haptic')].map(input => input.checked),
+  }));
+  const clearCounts = () => page.evaluate(() => { __controlWrites = []; __settingsOpens = 0; });
+  const assertActivation = async before => {
+    const after = await snapshot();
+    assert.equal(after.theme, selector === '#theme' ? before.theme === 'dark' ? 'light' : 'dark' : before.theme);
+    assert.equal(after.sound, selector === '#sound' ? !before.sound : before.sound);
+    assert.equal(after.settings, selector === '#settings-open' ? true : before.settings);
+    assert.deepEqual(after.popped, before.popped, 'topbar controls must not restore or pop pockets');
+    assert.deepEqual(after.switches, before.switches, 'a topbar touch must not toggle a bubble haptic switch');
+    const counts = await page.evaluate(() => ({ writes: __controlWrites, opens: __settingsOpens }));
+    if (selector === '#settings-open') assert.equal(counts.opens, 1, 'one touch must open the dialog once');
+    else assert.equal(counts.writes.filter(item => item.key === (selector === '#theme' ? 'bubble.theme' : 'bubble.sound')).length, 1,
+      'one touch must toggle the setting once');
+    return after;
+  };
+  const restore = async () => {
+    if (selector === '#settings-open') {
+      const end = await replayControlTouch(page, '#settings-close');
+      assert.equal(end.endPrevented, true);
+      assert.equal(await page.locator('#settings').evaluate(dialog => dialog.open), false, 'close must work on the first raw touch too');
+    } else await page.locator(selector).evaluate(button => button.click());
+    await clearCounts();
+  };
+
+  const initial = await snapshot();
+  await clearCounts();
+  const redirected = await replayControlTouch(page, selector, { retargeted: true });
+  await assertActivation(initial);
+  assert.equal(redirected.startPrevented, true); assert.equal(redirected.endPrevented, true);
+  await restore();
+  const direct = await replayControlTouch(page, selector);
+  await assertActivation(initial); assert.equal(direct.endPrevented, true);
+  await restore();
+  for (const options of [{ cancel: true }, { moveInside: true }, { blur: true }]) {
+    await replayControlTouch(page, selector, options);
+    assert.deepEqual(await snapshot(), initial, 'cancelled gestures must leave controls and pockets unchanged');
+  }
+  await page.locator(selector).tap();
+  const afterTrustedTap = await assertActivation(initial);
+  await page.waitForTimeout(350);
+  assert.deepEqual(await snapshot(), afterTrustedTap);
+  await assertActivation(initial);
+  if (selector !== '#settings-open') {
+    assert.equal(await page.evaluate(() => document.activeElement.id), selector.slice(1));
+    await clearCounts();
+    if (selector === '#sound') {
+      await page.evaluate(() => __interactionAudio.context.suspend());
+      assert.equal(await page.evaluate(() => __interactionAudio.context.state), 'suspended');
+    }
+    await page.locator(selector).tap();
+    await assertActivation(afterTrustedTap);
+    if (selector === '#sound') await page.waitForFunction(() => __interactionAudio.context?.state === 'running');
+  }
+  if (selector === '#settings-open') {
+    const before = await snapshot();
+    await replayControlTouch(page, '#theme', { retargeted: true });
+    assert.deepEqual(await snapshot(), before, 'the modal backdrop must block topbar controls');
+    await restore();
+  }
+  return { selector, nativeHapticTargets: initial.switches.length };
+}
+
 try {
+  for (const selector of ['#theme', '#sound', '#settings-open']) {
+    await check(`topbar ${selector} works on the first touch after popping`, () => topbarFirstTouchScenario(selector));
+  }
   await check('first refill touch works even when click is lost or retargeted', () => firstRefillTouchScenario());
   await check('first refill touch at the button edge survives its pressed animation', async () => {
     const { ctx, page } = await context({ isMobile: true, hasTouch: true });
@@ -464,6 +557,9 @@ try {
     const { webkit } = await import(pathToFileURL(path.join(webkitPackage, 'index.mjs')));
     webkitBrowser = await webkit.launch({ headless: true });
     report.browsers.webkit = webkitBrowser.version();
+    for (const selector of ['#theme', '#sound', '#settings-open']) {
+      await check(`WebKit topbar ${selector} works on the first touch after a native haptic tap`, () => topbarFirstTouchScenario(selector, webkitBrowser));
+    }
     await check('WebKit first refill touch bypasses the native haptic target', () => firstRefillTouchScenario(webkitBrowser));
     await check('WebKit rubbing is silent while the pop remains audible', () => soundScenario(webkitBrowser));
     await check('iOS native haptic target accepts a trusted tap only inside the circle', async () => {
