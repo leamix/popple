@@ -65,7 +65,8 @@ export const SHEET_CONFIG = freeze({
   tileRadiusFactor: 4,
   popPulseSeconds: 0.28,
   strain: freeze({ compression: 0.8, bulge: 0.95 }),
-  pull: freeze({ compression: 0.066, bulge: 0.055, pulse: 0.0115 }),
+  pull: freeze({ compression: 0.12, bulge: 0.10, pulse: 0.0115 }),
+  surfaceDisplacementScale: 2,
   contact: freeze({ pull: 0.065, strain: 0.25, distanceGain: 1.25, attack: 26, release: 16, reducedRelease: 28, initialStrength: 0.16, forceBase: 0.7, forceRange: 0.6 }),
   coupling: freeze({ distanceGain: 4, strain: 0.23, pulseTension: 0.06 }),
   pulse: freeze({ frequency: 32, decay: 16, self: 0.11, neighbour: 0.055, maximum: 0.18 }),
@@ -125,7 +126,16 @@ export const APP_CONFIG = freeze({
 export const LIGHTING_CONFIG = freeze({
   dataTimeoutMilliseconds: 5000,
   maximumLightShift: 0.17,
-  maximumReflectionAngle: 0.95,
+  maximumReflectionAngle: 0.85,
+  tilt: freeze({
+    deadZoneDegrees: 2.5,
+    lightRollGain: 0.09,
+    lightPitchGain: 0.08,
+    yawLightGain: 0.024,
+    orbitRollGain: 0.42,
+    orbitPitchGain: 0.18,
+    orbitYawGain: 0.22,
+  }),
 });
 
 export const POP_SOUND_CONFIG = freeze({

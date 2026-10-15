@@ -2,6 +2,7 @@
 // the same height field provides the finger dent and the collapsed creases.
 import { makeMembrane } from '../core/membrane.js';
 import { MAX_SHEET_SITES, SheetState } from '../core/sheet.js';
+import { SHEET_CONFIG } from '../core/config.js';
 import { BubbleBatch } from './bubble-batch.js';
 import { SheetBatch } from './sheet-batch.js';
 const vertex = `
@@ -331,7 +332,7 @@ void drawSheet() {
     // local field relights neighbours; rupture adds one small settling pulse.
     float bridge=exp(-sq((distance-1.30)/.42));
     slope+=direction*bridge*link.z*.085;
-    slope+=link.xy*vec2(1.,-1.)*bridge*1.4;
+    slope+=link.xy*vec2(1.,-1.)*bridge*${SHEET_CONFIG.surfaceDisplacementScale.toFixed(1)};
     contact=max(contact,gutter*(.65+.35*max(0.,-direction.y)));
     vec2 shadowOffset=turn(vec2(.065,-.10),u_light_angle);
     float shadowDistance=length(q-shadowOffset);

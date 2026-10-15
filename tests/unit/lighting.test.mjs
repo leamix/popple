@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DeviceLighting, MAX_LIGHT_SHIFT, angleDifference, readOrientation, orientationLight } from '../../public/js/rendering/lighting.js';
+import { DeviceLighting, MAX_LIGHT_SHIFT, MAX_REFLECTION_ANGLE, angleDifference, readOrientation, orientationLight } from '../../public/js/rendering/lighting.js';
 
 class Events {
   constructor() { this.listeners = new Map(); }
@@ -62,13 +62,22 @@ test('orientation maps neutral, tilt and yaw to a small bounded light vector', (
   assert.ok(Math.abs(orientationLight({ ...baseline, alpha: 45 }, baseline).x) > .005);
   const ordinaryTilt = orientationLight({ ...baseline, gamma: 25 }, baseline);
   // A comfortable tilt has visible travel, while keeping far below the safety bound.
-  assert.ok(ordinaryTilt.x > .075 && ordinaryTilt.x < .085);
+  assert.ok(ordinaryTilt.x > .045 && ordinaryTilt.x < .06);
   assert.equal(ordinaryTilt.y, 0);
   for (let beta = -180; beta <= 180; beta += 20) for (let gamma = -90; gamma <= 90; gamma += 10) {
     const vector = orientationLight({ alpha: 130, beta, gamma }, baseline);
     assert.ok(Number.isFinite(vector.x) && Number.isFinite(vector.y));
     assert.ok(Math.hypot(vector.x, vector.y) <= MAX_LIGHT_SHIFT);
   }
+});
+
+test('small sensor drift stays neutral and a gentle tilt only nudges the reflections', () => {
+  assert.deepEqual(orientationLight({ alpha: 1, beta: -1, gamma: 2 }, baseline), { x: 0, y: 0, angle: 0 });
+  const gentle = orientationLight({ ...baseline, gamma: 5 }, baseline);
+  assert.ok(gentle.angle > 0 && gentle.angle < .025, `A five-degree roll should move reflections by under 1.5 degrees; got ${gentle.angle}`);
+  const comfortable = orientationLight({ ...baseline, gamma: 25 }, baseline);
+  const degrees = comfortable.angle * 180 / Math.PI;
+  assert.ok(degrees >= 8 && degrees <= 11, `A comfortable tilt should remain visible; got ${degrees} degrees`);
 });
 
 test('yaw wraps through north smoothly and invalid input never introduces NaN', () => {
@@ -98,8 +107,8 @@ test('ordinary tilt and yaw move reflection angular placement visibly around the
   const roll = orientationLight({ ...baseline, gamma: 25 }, baseline);
   const yaw = orientationLight({ ...baseline, alpha: 25 }, baseline);
   const degrees = radians => radians * 180 / Math.PI;
-  assert.ok(degrees(roll.angle) >= 20 && degrees(roll.angle) <= 25);
-  assert.ok(degrees(yaw.angle) >= 13 && degrees(yaw.angle) <= 17);
+  assert.ok(degrees(roll.angle) >= 8 && degrees(roll.angle) <= 11);
+  assert.ok(degrees(yaw.angle) >= 4 && degrees(yaw.angle) <= 6);
   assert.ok(Math.hypot(roll.x, roll.y) <= MAX_LIGHT_SHIFT);
 });
 
@@ -118,10 +127,10 @@ test('reflection orbit is screen-relative, smoothly bounded, and continuous thro
     for (let alpha = 0; alpha < 360; alpha += 30) {
       const vector = orientationLight({ alpha, beta, gamma }, baseline);
       assert.ok(Number.isFinite(vector.angle));
-      assert.ok(Math.abs(vector.angle) <= .95);
+      assert.ok(Math.abs(vector.angle) <= MAX_REFLECTION_ANGLE);
     }
   }
-  assert.ok(orientationLight({ alpha: 90, beta: 160, gamma: 90 }, baseline).angle > .9);
+  assert.ok(orientationLight({ alpha: 90, beta: 160, gamma: 90 }, baseline).angle > .7);
 });
 
 test('sensor helper smooths orbit independently and resets its angle for reduced motion', async () => {
@@ -134,9 +143,9 @@ test('sensor helper smooths orbit independently and resets its angle for reduced
   light.setReduced(false); env.sample(0, 0); const changeCount = changes.length;
   // A counter-tilt cancels the light's source displacement while twist still
   // moves its angular placement. Such an event must still trigger rendering.
-  env.sample(.635, 5.106, 25);
+  env.sample(.7, 6.1, 25);
   assert.ok(Math.hypot(light.vector.x, light.vector.y) < .0001);
-  assert.ok(light.vector.angle > .03); assert.ok(changes.length > changeCount);
+  assert.ok(light.vector.angle > .015); assert.ok(changes.length > changeCount);
   light.disable(); assert.equal(light.vector.angle, 0); light.destroy();
 });
 

@@ -25,12 +25,20 @@ export function orientationLight(event, baseline, screenAngle = 0) {
     ? 0 : angleDifference(sample.alpha, reference.alpha) * RADIANS;
   const roll = angleDifference(sample.gamma, reference.gamma);
   const pitch = angleDifference(sample.beta, reference.beta);
+  // Phone sensors can wander by a couple of degrees while the device is held
+  // still. Ignore that central cone, then scale the remaining tilt smoothly.
+  const deadZone = LIGHTING_CONFIG.tilt.deadZoneDegrees;
+  const tiltLength = Math.hypot(roll, pitch);
+  const tiltScale = tiltLength > deadZone ? (tiltLength - deadZone) / tiltLength : 0;
+  const filteredRoll = roll * tiltScale;
+  const filteredPitch = pitch * tiltScale;
+  const filteredYaw = Math.sign(yaw) * Math.max(0, Math.abs(yaw) - deadZone * RADIANS);
   // A small movement of a broad light source, not an object sliding on the film.
-  // Tilt is softened before the radial bound; yaw gently turns the same reflection.
-  const dx = .14 * Math.tanh(roll / 35)
-    - .048 * Math.sin(yaw);
-  const dy = -.124 * Math.tanh(pitch / 35)
-    + .024 * (1 - Math.cos(yaw));
+  // Gentle tilts now travel only a fraction of their physical angle.
+  const dx = LIGHTING_CONFIG.tilt.lightRollGain * Math.tanh(filteredRoll / 35)
+    - LIGHTING_CONFIG.tilt.yawLightGain * Math.sin(filteredYaw);
+  const dy = -LIGHTING_CONFIG.tilt.lightPitchGain * Math.tanh(filteredPitch / 35)
+    + LIGHTING_CONFIG.tilt.yawLightGain * .5 * (1 - Math.cos(filteredYaw));
   const angle = (Number.isFinite(screenAngle) ? screenAngle : 0) * RADIANS;
   const cosine = Math.cos(angle), sine = Math.sin(angle);
   // Rotate device axes into the currently displayed screen axes.
@@ -38,12 +46,14 @@ export function orientationLight(event, baseline, screenAngle = 0) {
   const y = -dx * sine + dy * cosine;
   const distance = Math.hypot(x, y);
   const scale = distance ? MAX_LIGHT_SHIFT * Math.tanh(distance / MAX_LIGHT_SHIFT) / distance : 1;
-  // Orbit moves reflection placement around the bubble, independently of the
-  // light source's subtle x/y shift. Roll leads, pitch adds gentler travel.
-  const screenRoll = roll * cosine + pitch * sine;
-  const screenPitch = -roll * sine + pitch * cosine;
+  // Orbit moves reflection placement independently of the light source's
+  // subtle x/y shift, with reduced gain and filtered motion on both axes.
+  const screenRoll = filteredRoll * cosine + filteredPitch * sine;
+  const screenPitch = -filteredRoll * sine + filteredPitch * cosine;
   const orbitAngle = MAX_REFLECTION_ANGLE * Math.tanh(
-    .95 * screenRoll / 50 + .35 * screenPitch / 50 + .65 * Math.sin(yaw)
+    LIGHTING_CONFIG.tilt.orbitRollGain * screenRoll / 50
+      + LIGHTING_CONFIG.tilt.orbitPitchGain * screenPitch / 50
+      + LIGHTING_CONFIG.tilt.orbitYawGain * Math.sin(filteredYaw)
   );
   return { x: x * scale, y: y * scale, angle: orbitAngle };
 }

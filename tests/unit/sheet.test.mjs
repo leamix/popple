@@ -118,6 +118,23 @@ test('one firm press gives visible local weld travel without activating neighbou
     'render tile supports must include the largest possible weld travel');
 });
 
+test('a short ordinary press moves adjacent film shoulders by visible phone-scale pixels', () => {
+  const geometry = createBubbleLayout(390);
+  const sheet = new SheetState();
+  const bubbles = states(geometry.layout.length);
+  const index = 4;
+  sheet.resize(geometry.layout, geometry.width, geometry.height);
+  bubbles[index].press(.4, -.2);
+  advance(bubbles[index], .1);
+  sheet.update(bubbles);
+  const maximumTravel = Math.max(...Array.from(sheet.neighbours[index], neighbour => {
+    const offset = neighbour * 4;
+    return Math.hypot(sheet.deformation[offset], sheet.deformation[offset + 1])
+      * geometry.layout[neighbour].radius * SHEET_CONFIG.surfaceDisplacementScale;
+  }));
+  assert.ok(maximumTravel >= 2.3, `Expected at least 2.3 CSS px of visible shoulder travel, got ${maximumTravel}`);
+});
+
 test('a pop creates one damped local pulse and reduced motion suppresses it', () => {
   const sheet = new SheetState();
   sheet.resize([pocket(20, 20), pocket(44, 20), pocket(180, 20)], 200, 50);
