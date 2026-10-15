@@ -26,7 +26,7 @@ function seedFor(index) {
 
 // A soft initial yield gives way to taut plastic, then the last push deepens
 // the dent quickly. This shapes only deformation: rupture still uses the
-// nominal hold timer. Quadratics avoid per-frame powers or allocations.
+// nominal hold timer. The final smoothstep exposes the yield before rupture.
 function resistanceProfile(progress, yieldEnd, tensionEnd) {
   const profile = PHYSICS_CONFIG.resistance;
   if (progress < yieldEnd) {
@@ -38,7 +38,7 @@ function resistanceProfile(progress, yieldEnd, tensionEnd) {
       * (progress - yieldEnd) / (tensionEnd - yieldEnd);
   }
   const phase = (progress - tensionEnd) / (1 - tensionEnd);
-  return profile.tensionCompression + (1 - profile.tensionCompression) * phase * phase;
+  return profile.tensionCompression + (1 - profile.tensionCompression) * phase * phase * (3 - 2 * phase);
 }
 
 /** Random, overlapping starts with a fixed deadline for the whole sheet. */
@@ -93,6 +93,8 @@ export class BubbleState {
   setHoldDuration(seconds) {
     this.holdDuration = clamp(finite(seconds, DEFAULT_HOLD_SECONDS),
       PHYSICS_CONFIG.minimumHoldSeconds, PHYSICS_CONFIG.maximumHoldSeconds);
+    this._responseRate = Math.min(PHYSICS_CONFIG.resistance.maximumResponseRate,
+      Math.max(1, PHYSICS_CONFIG.resistance.responseSeconds / this.holdDuration));
     return this.holdDuration;
   }
 
@@ -273,12 +275,15 @@ export class BubbleState {
     const positionDamping = this.popped ? this.active ? PHYSICS_CONFIG.spring.position.poppedActiveDamping
       : PHYSICS_CONFIG.spring.position.poppedIdleDamping : this.active
         ? PHYSICS_CONFIG.spring.position.intactActiveDamping : PHYSICS_CONFIG.spring.position.intactIdleDamping;
-    const stiffness = this.popped ? PHYSICS_CONFIG.spring.compression.poppedStiffness : this.active
-      ? this._intactCompressionStiffness : PHYSICS_CONFIG.spring.compression.intactIdleStiffness;
+    // A fixed spring hid the last push on short holds. Scale its clock, keeping
+    // the damping ratio and the independent rupture deadline unchanged.
+    const responseRate = this.active && !this.popped ? this._responseRate : 1;
+    const stiffness = (this.popped ? PHYSICS_CONFIG.spring.compression.poppedStiffness : this.active
+      ? this._intactCompressionStiffness : PHYSICS_CONFIG.spring.compression.intactIdleStiffness) * responseRate * responseRate;
     // Slack plastic dissipates the poke instead of rebounding like an air
     // pocket. Keep this response close to critically damped.
-    const damping = this.popped ? PHYSICS_CONFIG.spring.compression.poppedDamping : this.active
-      ? PHYSICS_CONFIG.spring.compression.intactActiveDamping : PHYSICS_CONFIG.spring.compression.intactIdleDamping;
+    const damping = (this.popped ? PHYSICS_CONFIG.spring.compression.poppedDamping : this.active
+      ? PHYSICS_CONFIG.spring.compression.intactActiveDamping : PHYSICS_CONFIG.spring.compression.intactIdleDamping) * responseRate;
 
     // Small integration steps keep the same damped spring behaviour at 30,
     // 60 and 120 Hz, without an external animation/physics dependency.
@@ -293,8 +298,8 @@ export class BubbleState {
       this._compressionVelocity += ((targetCompression - this.compression) * stiffness -
         this._compressionVelocity * damping) * h;
       this.compression += this._compressionVelocity * h;
-      this._bulgeVelocity += ((targetBulge - this.bulge) * PHYSICS_CONFIG.spring.bulge.stiffness
-        - this._bulgeVelocity * PHYSICS_CONFIG.spring.bulge.damping) * h;
+      this._bulgeVelocity += ((targetBulge - this.bulge) * PHYSICS_CONFIG.spring.bulge.stiffness * responseRate * responseRate
+        - this._bulgeVelocity * PHYSICS_CONFIG.spring.bulge.damping * responseRate) * h;
       this.bulge += this._bulgeVelocity * h;
     }
 

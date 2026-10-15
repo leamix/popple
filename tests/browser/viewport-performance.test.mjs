@@ -16,9 +16,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const phase = argument('phase') || 'after';
+const baselinePhase = argument('baseline') || 'before';
+const compareBaseline = !!argument('baseline') || phase === 'after';
 const ref = argument('ref');
 const browserFlavor = argument('browser') || 'chrome-metal';
 assert.ok(/^[a-zA-Z0-9_-]+$/.test(phase));
+assert.ok(/^[a-zA-Z0-9_-]+$/.test(baselinePhase));
 assert.ok(['chrome-metal', 'headless-shell'].includes(browserFlavor));
 const requestedProfiles = argument('profiles')?.split(',');
 const profiles = [
@@ -86,6 +89,8 @@ globalThis.__viewportScene=()=>({
   refilling:bubbles.filter(b=>b.refilling).length,active:bubbles.filter(b=>b.active).length,
   unsettled:bubbles.filter(b=>b.needsAnimation).length,
   framePending:!!frame,renderDirty,diameter,layout:layout.map(p=>({...p})),
+  filmAnimating:!!renderer.sheetState.needsAnimation,
+  filmOffset:Math.max(0,...Array.from({length:layout.length},(_,i)=>Math.hypot(renderer.sheetState.deformation[i*4],renderer.sheetState.deformation[i*4+1]))),
   canvas:{width:renderer.canvas.width,height:renderer.canvas.height},
   bounds:playground.getBoundingClientRect().toJSON(),
 });
@@ -277,6 +282,33 @@ try {
       await page.evaluate(() => __viewportPerf.start('idle'));
       await page.waitForTimeout(800);
       const idleScene = await page.evaluate(() => __viewportScene());
+      const first = initialScene.layout[0];
+      const second = initialScene.layout.find(p => p.row === first.row && p.column !== first.column);
+      assert.ok(second, 'Film probe needs two pockets in one row');
+      const gap = { x: initialScene.bounds.x + (first.x + second.x) / 2, y: initialScene.bounds.y + first.y };
+      await page.evaluate(() => __viewportPerf.start('film-hold'));
+      if (profile.touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...gap, id: 1, force: .5 }] });
+      else { await page.mouse.move(gap.x, gap.y); await page.mouse.down(); }
+      await page.waitForTimeout(1300);
+      const heldFilmScene = await page.evaluate(() => __viewportScene());
+      assert.equal(heldFilmScene.popped, 0, 'A film hold cannot pop adjacent air pockets');
+      if (!ref) {
+        assert.ok(heldFilmScene.filmOffset > .025, 'The film retains tension beyond the normal wake timeout');
+        assert.equal(heldFilmScene.framePending, false, 'A stationary settled hold needs no continuous rendering');
+      }
+      await page.evaluate(() => __viewportPerf.start('film-drag-release'));
+      for (let step = 0; step < 18; step++) {
+        const point = { x: gap.x, y: gap.y + Math.sin(step * .55) * 5 };
+        if (profile.touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...point, id: 1, force: .5 }] });
+        else await page.mouse.move(point.x, point.y);
+        await page.waitForTimeout(20);
+      }
+      if (profile.touch) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      else await page.mouse.up();
+      await page.waitForTimeout(1100);
+      const releasedFilmScene = await page.evaluate(() => __viewportScene());
+      assert.equal(releasedFilmScene.popped, 0);
+      assert.equal(releasedFilmScene.filmAnimating, false);
       await page.evaluate(() => __viewportPerf.start('popping'));
       const expectedPops = Math.min(8, initialScene.count);
       for (let i = 0; i < expectedPops; i++) {
@@ -323,7 +355,7 @@ try {
       await page.evaluate(() => __viewportPerf.start('settled-idle'));
       await page.waitForTimeout(600);
       const raw = await page.evaluate(() => __viewportPerf.results());
-      const result = { ...profile, backend: raw.backend, initialScene, idleScene, poppedScene, refillScene, finalScene, settledScene,
+      const result = { ...profile, backend: raw.backend, initialScene, idleScene, heldFilmScene, releasedFilmScene, poppedScene, refillScene, finalScene, settledScene,
         expectedPops, audioContexts: raw.audioContexts, disjointGpuQueries: raw.disjointGpuQueries, pendingGpuQueries: raw.pendingGpuQueries,
         phases: Object.fromEntries(Object.entries(raw.phases).map(([name, value]) => [name, summarizePhase(value)])), raw: raw.phases };
       assert.equal(settledScene.active, 0);
@@ -345,15 +377,15 @@ try {
   await browser.close();
   await save();
   let before;
-  try { before = JSON.parse(await readFile(path.join(output, 'performance-viewport-before.json'), 'utf8')); } catch { /* First run. */ }
+  try { before = JSON.parse(await readFile(path.join(output, `performance-viewport-${baselinePhase}.json`), 'utf8')); } catch { /* First run. */ }
   const esc = value => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
   const ms = value => value == null ? '—' : value.toFixed(2);
   const rows = report.profiles.flatMap(profile => Object.entries(profile.phases).map(([name, value]) => {
-    const baseline = phase === 'after' ? before?.profiles.find(item => item.name === profile.name)?.phases[name] : null;
+    const baseline = compareBaseline ? before?.profiles.find(item => item.name === profile.name)?.phases[name] : null;
     return `<tr><td>${esc(profile.name)}</td><td>${name}</td><td>${value.bubbleCounts.length ? `${Math.min(...value.bubbleCounts)}–${Math.max(...value.bubbleCounts)}` : profile.initialScene.count}</td><td>${ms(baseline?.cpuRenderMs.p50)} → ${ms(value.cpuRenderMs.p50)}</td><td>${ms(baseline?.cpuRenderMs.p95)} → ${ms(value.cpuRenderMs.p95)}</td><td>${ms(value.gpuMs.p50)} / ${ms(value.gpuMs.p95)}</td><td>${ms(baseline?.resizeMs.p50)} → ${ms(value.resizeMs.p50)}</td><td>${ms(baseline?.resizeMs.p95)} → ${ms(value.resizeMs.p95)}</td><td>${ms(baseline?.rafMs.p95)} → ${ms(value.rafMs.p95)}</td><td>${value.longFrames.over25ms} / ${value.longFrames.over33ms} / ${value.longFrames.over50ms} of ${value.rafMs.samples}</td><td>${ms(value.pointerToRenderMs.p50)} / ${ms(value.pointerToRenderMs.p95)}</td></tr>`;
   })).join('');
   const success = report.profiles.map(profile => {
-    const baseline = phase === 'after' ? before?.profiles.find(item => item.name === profile.name) : null;
+    const baseline = compareBaseline ? before?.profiles.find(item => item.name === profile.name) : null;
     const pointerMaximum = `${baseline ? `${ms(baseline.phases.popping.pointerToRenderMs.max)} → ` : ''}${ms(profile.phases.popping.pointerToRenderMs.max)}`;
     const bubbleCount = baseline ? `${baseline.initialScene.count} → ${profile.initialScene.count} active bubbles (baseline → final)` : `${profile.initialScene.count} initial/final bubbles`;
     const audioUnlock = profile.phases.popping.coldAudioUnlockMs?.samples

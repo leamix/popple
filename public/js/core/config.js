@@ -59,13 +59,14 @@ export const LAYOUT_CONFIG = freeze({
 
 export const SHEET_CONFIG = freeze({
   maximumShaderSites: 24,
-  supportRadius: 3.065,
+  supportRadius: 3.09,
   neighbourRadius: 2.7,
-  maximumOffset: 0.05,
+  maximumOffset: 0.075,
   tileRadiusFactor: 4,
   popPulseSeconds: 0.28,
   strain: freeze({ compression: 0.8, bulge: 0.95 }),
-  pull: freeze({ compression: 0.042, bulge: 0.035, pulse: 0.0115 }),
+  pull: freeze({ compression: 0.066, bulge: 0.055, pulse: 0.0115 }),
+  contact: freeze({ pull: 0.065, strain: 0.25, distanceGain: 1.25, attack: 26, release: 16, reducedRelease: 28, initialStrength: 0.16, forceBase: 0.7, forceRange: 0.6 }),
   coupling: freeze({ distanceGain: 4, strain: 0.23, pulseTension: 0.06 }),
   pulse: freeze({ frequency: 32, decay: 16, self: 0.11, neighbour: 0.055, maximum: 0.18 }),
 });
@@ -82,7 +83,7 @@ export const PHYSICS_CONFIG = freeze({
   pressure: freeze({ minimumEvidence: 0.02, maximumEvidence: 0.98, minimumVariation: 0.075, forceFloor: 0.35 }),
   initialContact: freeze({ intactCompression: 0.16, poppedCompression: 0.085, intactBulge: 0.035 }),
   activeCompression: freeze({ poppedBase: 0.12, poppedForce: 0.07, intactBase: 0.25, intactProgress: 0.53, intactForce: 0.05 }),
-  resistance: freeze({ yieldEnd: 0.28, yieldCompression: 0.40, tensionEnd: 0.56, tensionCompression: 0.50, yieldVariation: 0.016, tensionVariation: 0.036, stiffnessVariation: 0.06 }),
+  resistance: freeze({ yieldEnd: 0.24, yieldCompression: 0.40, tensionEnd: 0.54, tensionCompression: 0.44, yieldVariation: 0.016, tensionVariation: 0.036, stiffnessVariation: 0.06, responseSeconds: 1.2, maximumResponseRate: 2.8 }),
   bulge: freeze({ base: 0.20, distance: 0.36, tensionGain: 0.16, maximum: 0.6 }),
   collapse: freeze({ decay: 16, frequency: 26 }),
   refill: freeze({ minimumSeconds: 1, secondsRange: 0.5, durationRatio: 0.58, durationRatioRange: 0.10, gapWeight: 0.6, gapWeightRange: 0.8 }),

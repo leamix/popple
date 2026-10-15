@@ -34,9 +34,11 @@ export class SheetState {
     this._hash = new Map();
     this._cellSize = 1;
     this._maxRadius = 0;
+    this._contacts = new Map();
   }
 
   resize(layout, width, height) {
+    this._contacts.clear();
     this.layout = layout;
     this.width = Math.max(0, Number.isFinite(width) ? width : 0);
     this.height = Math.max(0, Number.isFinite(height) ? height : 0);
@@ -114,7 +116,7 @@ export class SheetState {
     }
   }
 
-  /** Visit a small hash rectangle. Used only while building geometry caches. */
+  /** Visit a small hash rectangle while building geometry or moving a contact. */
   _visit(minX, minY, maxX, maxY, visit) {
     const firstColumn = Math.floor(minX / this._cellSize);
     const lastColumn = Math.floor(maxX / this._cellSize);
@@ -154,6 +156,65 @@ export class SheetState {
     this._addTile(x + halfWidth, y + halfHeight, width - halfWidth, height - halfHeight, depth + 1);
   }
 
+  /** Cache a gap's nearest supports only on input; frames reuse these arrays. */
+  setContact(id, x, y, pressure = PHYSICS_CONFIG.defaultPressure) {
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > this.width || y > this.height) {
+      this.releaseContact(id);
+      return;
+    }
+    let contact = this._contacts.get(id);
+    if (!contact) {
+      contact = { strength: SHEET_CONFIG.contact.initialStrength, target: 1, indices: [],
+        directions: new Float32Array(12), weights: new Float32Array(6) };
+      this._contacts.set(id, contact);
+    }
+    contact.target = SHEET_CONFIG.contact.forceBase + SHEET_CONFIG.contact.forceRange
+      * clamp01(Number.isFinite(pressure) ? pressure : PHYSICS_CONFIG.defaultPressure);
+    const indices = contact.indices;
+    indices.length = 0;
+    const reach = this._maxRadius * NEIGHBOUR_RADIUS;
+    this._visit(x - reach, y - reach, x + reach, y + reach, index => {
+      const site = this.layout[index];
+      const dx = x - site.x, dy = y - site.y;
+      if (dx * dx + dy * dy < (site.radius * NEIGHBOUR_RADIUS) ** 2) indices.push(index);
+    });
+    indices.sort((a, b) => {
+      const first = this.layout[a], second = this.layout[b];
+      return (x - first.x) ** 2 + (y - first.y) ** 2 - (x - second.x) ** 2 - (y - second.y) ** 2;
+    });
+    indices.length = Math.min(6, indices.length);
+    for (let link = 0; link < indices.length; link += 1) {
+      const site = this.layout[indices[link]];
+      const dx = x - site.x, dy = y - site.y, distance = Math.hypot(dx, dy);
+      contact.directions[link * 2] = distance ? dx / distance : 0;
+      contact.directions[link * 2 + 1] = distance ? dy / distance : 0;
+      contact.weights[link] = Math.min(1, (1 - distance / (site.radius * NEIGHBOUR_RADIUS)) * SHEET_CONFIG.contact.distanceGain);
+    }
+  }
+
+  releaseContact(id) {
+    const contact = this._contacts.get(id);
+    if (contact) contact.target = 0;
+  }
+
+  get needsAnimation() {
+    for (const contact of this._contacts.values()) if (contact.strength !== contact.target) return true;
+    return false;
+  }
+
+  stepContacts(dt, reduced = false) {
+    const delta = Number.isFinite(dt) ? Math.max(0, Math.min(PHYSICS_CONFIG.maximumFrameSeconds, dt)) : 0;
+    for (const [id, contact] of this._contacts) {
+      const rate = contact.target ? SHEET_CONFIG.contact.attack
+        : reduced ? SHEET_CONFIG.contact.reducedRelease : SHEET_CONFIG.contact.release;
+      contact.strength += (contact.target - contact.strength) * (1 - Math.exp(-delta * rate));
+      if (Math.abs(contact.target - contact.strength) < PHYSICS_CONFIG.settleEpsilon) {
+        if (contact.target) contact.strength = contact.target;
+        else this._contacts.delete(id);
+      }
+    }
+  }
+
   update(bubbles, reduced = false) {
     const deformation = this.deformation;
     deformation.fill(0);
@@ -185,6 +246,17 @@ export class SheetState {
         deformation[target + 3] += wave * SHEET_CONFIG.pulse.neighbour * weight;
       }
     }
+    for (const contact of this._contacts.values()) {
+      const pull = contact.strength * SHEET_CONFIG.contact.pull;
+      const strain = contact.strength * SHEET_CONFIG.contact.strain;
+      for (let link = 0; link < contact.indices.length; link += 1) {
+        const offset = contact.indices[link] * 4;
+        const weight = contact.weights[link];
+        deformation[offset] += contact.directions[link * 2] * pull * weight;
+        deformation[offset + 1] += contact.directions[link * 2 + 1] * pull * weight;
+        deformation[offset + 2] += strain * weight;
+      }
+    }
     for (let index = 0; index < this.layout.length; index += 1) {
       const offset = index * 4;
       const x = deformation[offset], y = deformation[offset + 1];
@@ -201,6 +273,7 @@ export class SheetState {
 
   reset() {
     this.deformation.fill(0);
+    this._contacts.clear();
   }
 
   /** Pointer hit lookup preserves original layout identity without an N scan. */

@@ -130,6 +130,24 @@ test('each pocket has a tiny reproducible resistance difference while all retain
   for (const bubble of bubbles) assert.equal(advance(bubble, 0.12), 1);
 });
 
+test('a half-second hold has a readable resistance pause and yields well before the pop', () => {
+  for (const frequency of [30, 60, 120]) {
+    const bubble = new BubbleState(22, .5);
+    bubble.press(.5, 0);
+    advance(bubble, .19, frequency);
+    const beforePause = bubble.compression;
+    advance(bubble, .1, frequency);
+    const afterPause = bubble.compression;
+    advance(bubble, .14, frequency);
+    const yielded = bubble.compression;
+    assert.ok(afterPause - beforePause < .055, `resistance is a visible pause at ${frequency} Hz`);
+    assert.ok(yielded - afterPause > .16, `yield is visible before rupture at ${frequency} Hz`);
+    assert.ok(yielded > .69, 'the spring must not hide the final push until after rupture');
+    assert.equal(bubble.popped, false);
+    assert.equal(advance(bubble, .07, frequency), 1, 'visual response cannot extend the hold timer');
+  }
+});
+
 test('resistance preserves exact custom hold timing at 30, 60 and 120 Hz', () => {
   for (const frequency of [30, 60, 120]) {
     for (const duration of [0.2, 0.3, 2]) {

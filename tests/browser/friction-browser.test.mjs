@@ -59,11 +59,11 @@ async function context(options = {}, targetBrowser = browser) {
   const { hold = .24, probeAudioPreparation = false, ...browserOptions } = options;
   const ctx = await targetBrowser.newContext({ viewport: { width: 390, height: 844 }, ...browserOptions });
   contexts.push(ctx);
-  await ctx.addInitScript(({ hold, probeAudioPreparation }) => {
+  await ctx.addInitScript(({ hold, probeAudioPreparation, reduced }) => {
     localStorage.setItem('bubble.hold', String(hold));
     localStorage.setItem('bubble.sound', 'true');
     localStorage.setItem('bubble.tilt', 'false');
-    localStorage.setItem('bubble.motion', 'false');
+    localStorage.setItem('bubble.motion', String(reduced));
     window.__hapticCalls = [];
     Object.defineProperty(navigator, 'vibrate', { configurable: true, value: duration => {
       __hapticCalls.push({ duration, active: (window.__bubbleStates ?? []).flatMap((b, index) => b.active ? [index] : []) });
@@ -84,7 +84,7 @@ async function context(options = {}, targetBrowser = browser) {
         };
       }
     }
-  }, { hold, probeAudioPreparation });
+  }, { hold, probeAudioPreparation, reduced: browserOptions.reducedMotion === 'reduce' });
   await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
   await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: rendererInstrumented }));
   const page = await ctx.newPage();
@@ -383,6 +383,75 @@ async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
 }
 
 try {
+  await check('film gap pulls neighbours, follows the mouse and settles after a stationary hold', async () => {
+    const { page } = await context({ hold: .5 });
+    const [a, b] = await adjacentPockets(page);
+    const gap = { x: (a.x + b.x) / 2, y: a.y };
+    await page.mouse.move(gap.x, gap.y); await page.mouse.down();
+    await page.waitForTimeout(1150);
+    await page.waitForFunction(({ a, b }) => {
+      const sheet = __interactionRenderer.sheetState;
+      return !sheet.needsAnimation && sheet.deformation[a.index * 4] > .025 && sheet.deformation[b.index * 4] < -.025;
+    }, { a, b });
+    const held = await page.evaluate(({ a, b }) => {
+      const sheet = __interactionRenderer.sheetState;
+      return { left: Array.from(sheet.deformation.slice(a.index * 4, a.index * 4 + 4)),
+        right: Array.from(sheet.deformation.slice(b.index * 4, b.index * 4 + 4)), awake: sheet.needsAnimation };
+    }, { a, b });
+    assert.ok(held.left[0] > .025 && held.right[0] < -.025);
+    assert.equal(held.awake, false, 'the settled held deformation needs no continuous animation');
+    assert.deepEqual(await active(page), []); assert.deepEqual(await popped(page), []);
+    await page.mouse.move(gap.x, gap.y + 5);
+    await page.waitForFunction(index => __interactionRenderer.sheetState.deformation[index * 4 + 1] > 0, a.index);
+    await page.mouse.up();
+    await page.waitForFunction(() => !__interactionRenderer.sheetState.needsAnimation
+      && __interactionRenderer.sheetState.deformation.every(v => v === 0));
+    assert.ok(await page.evaluate(() => __interactionRenderer.sheetState.deformation.every(v => v === 0)));
+    return held;
+  });
+  await check('film gap touch can hand off to a bubble and cancellation clears all film tension', async () => {
+    const { ctx, page } = await context({ hold: .5, hasTouch: true, isMobile: true });
+    const cdp = await ctx.newCDPSession(page);
+    const [a, b] = await adjacentPockets(page);
+    const gap = { x: (a.x + b.x) / 2, y: a.y, id: 1, force: .5 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [gap] });
+    await page.waitForFunction(i => __interactionRenderer.sheetState.deformation[i * 4] > .02, a.index);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: a.x, y: a.y, id: 1, force: .5 }] });
+    await waitPopped(page, a.index);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [gap] });
+    await page.waitForTimeout(100);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+    await page.waitForFunction(() => !__interactionRenderer.sheetState.needsAnimation);
+    assert.deepEqual(await popped(page), [a.index]); assert.deepEqual(await active(page), []);
+  });
+  await check('film gap reduced motion and resize never retain a stale pull', async () => {
+    const { page } = await context({ reducedMotion: 'reduce' });
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.reduced), 'true');
+    const [a, b] = await adjacentPockets(page);
+    await page.mouse.move((a.x + b.x) / 2, a.y); await page.mouse.down();
+    await page.waitForFunction(i => __interactionRenderer.sheetState.deformation[i * 4] > .02, a.index);
+    assert.ok(await page.evaluate(() => __interactionRenderer.sheetState.deformation.every((v, i) => i % 4 !== 3 || v === 0)));
+    await page.setViewportSize({ width: 430, height: 844 });
+    await page.waitForFunction(() => __interactionRenderer.width === 430 && !__interactionRenderer.sheetState.needsAnimation);
+    assert.equal(await page.evaluate(() => __interactionRenderer.sheetState.needsAnimation), false);
+    await page.mouse.up(); assert.deepEqual(await popped(page), []);
+  });
+  await check('film gap fingers keep independent ownership when one finger lifts', async () => {
+    const { ctx, page } = await context({ hasTouch: true, isMobile: true });
+    const cdp = await ctx.newCDPSession(page), [a, b, c] = await adjacentPockets(page, 3);
+    const first = { x: (a.x + b.x) / 2, y: a.y, id: 1, force: .5 };
+    const second = { x: (b.x + c.x) / 2, y: b.y, id: 2, force: .5 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [first, second] });
+    await page.waitForFunction(({ a, c }) => __interactionRenderer.sheetState.deformation[a.index * 4] > .02
+      && __interactionRenderer.sheetState.deformation[c.index * 4] < -.02, { a, c });
+    // CDP ends the listed contact; the other finger remains down.
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [first] });
+    await page.waitForFunction(({ a, c }) => __interactionRenderer.sheetState.deformation[a.index * 4] === 0
+      && __interactionRenderer.sheetState.deformation[c.index * 4] < -.02, { a, c });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.waitForFunction(() => __interactionRenderer.sheetState.deformation.every(v => v === 0));
+    assert.deepEqual(await popped(page), []); assert.deepEqual(await active(page), []);
+  });
   await check('audio prepares silently during startup idle and the first trusted hold still sounds', async () => {
     const { page } = await context({ probeAudioPreparation: true });
     await page.waitForFunction(() => __interactionAudio.context !== null, null, { timeout: 2000 });
@@ -650,6 +719,15 @@ try {
     const { webkit } = await import(pathToFileURL(path.join(webkitPackage, 'index.mjs')));
     webkitBrowser = await webkit.launch({ headless: true });
     report.browsers.webkit = webkitBrowser.version();
+    await check('WebKit film gap retains tension while asleep and releases without popping', async () => {
+      const { page } = await context({}, webkitBrowser), [a, b] = await adjacentPockets(page);
+      await page.mouse.move((a.x + b.x) / 2, a.y); await page.mouse.down();
+      await page.waitForFunction(i => __interactionRenderer.sheetState.deformation[i * 4] > .025
+        && !__interactionRenderer.sheetState.needsAnimation, a.index);
+      await page.mouse.up();
+      await page.waitForFunction(() => __interactionRenderer.sheetState.deformation.every(v => v === 0));
+      assert.deepEqual(await popped(page), []);
+    });
     await check('WebKit same-topology resize preserves native haptic nodes and disabled attributes', () => stableResizeHapticsScenario(webkitBrowser));
     for (const selector of ['#theme', '#sound', '#settings-open']) {
       await check(`WebKit topbar ${selector} works on the first touch after a native haptic tap`, () => topbarFirstTouchScenario(selector, webkitBrowser));

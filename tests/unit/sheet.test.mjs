@@ -13,6 +13,61 @@ const advance = (bubble, seconds) => {
   for (let elapsed = 0; elapsed < seconds - 1e-9; elapsed += 1 / 120) bubble.step(1 / 120);
 };
 
+test('empty film contact pulls nearby pockets toward the actual contact without pressing them', () => {
+  const sheet = new SheetState();
+  sheet.resize([pocket(20, 20), pocket(44, 20), pocket(180, 20)], 200, 60);
+  const bubbles = states(3);
+  sheet.setContact('finger', 32, 22, .5);
+  sheet.stepContacts(.15);
+  sheet.update(bubbles);
+  assert.ok(sheet.deformation[0] > .02 && sheet.deformation[4] < -.02);
+  assert.ok(sheet.deformation[1] > 0 && sheet.deformation[5] > 0);
+  assert.ok(tension(sheet, 0) > .05 && tension(sheet, 1) > .05);
+  assert.deepEqual(Array.from(sheet.deformation.slice(8)), [0, 0, 0, 0]);
+  assert.ok(bubbles.every(b => !b.active && !b.popped && b.compression === 0));
+  sheet.setContact('finger', 32, 16, .5);
+  sheet.update(bubbles);
+  assert.ok(sheet.deformation[1] < 0, 'dragging moves the pull to the new contact');
+});
+
+test('a stationary film hold sleeps without losing tension and a release wakes then fades fully', () => {
+  const sheet = new SheetState();
+  sheet.resize([pocket(20, 20), pocket(44, 20)], 80, 60);
+  const bubbles = states(2);
+  sheet.setContact(1, 32, 20);
+  for (let i = 0; i < 180; i++) sheet.stepContacts(1 / 60);
+  assert.equal(sheet.needsAnimation, false, 'an unchanged held frame needs no continuous rendering');
+  sheet.update(bubbles);
+  const held = sheet.deformation[0];
+  sheet.releaseContact(1);
+  assert.equal(sheet.needsAnimation, true, 'release must animate even after a settled held contact');
+  sheet.stepContacts(1 / 60);
+  sheet.update(bubbles);
+  assert.ok(sheet.deformation[0] > 0 && sheet.deformation[0] < held);
+  for (let i = 0; i < 180; i++) sheet.stepContacts(1 / 60);
+  sheet.update(bubbles);
+  assert.equal(sheet.needsAnimation, false);
+  assert.ok(sheet.deformation.every(value => value === 0));
+});
+
+test('independent film fingers release separately and geometry changes clear old contacts', () => {
+  const sheet = new SheetState();
+  const layout = [pocket(20, 20), pocket(44, 20), pocket(100, 20), pocket(124, 20)];
+  const bubbles = states(4);
+  sheet.resize(layout, 150, 60);
+  sheet.setContact(1, 32, 20); sheet.setContact(2, 112, 20);
+  sheet.stepContacts(.1);
+  sheet.releaseContact(1);
+  for (let i = 0; i < 180; i++) sheet.stepContacts(1 / 60);
+  sheet.update(bubbles);
+  assert.equal(sheet.deformation[0], 0);
+  assert.ok(sheet.deformation[8] > .02 && sheet.deformation[12] < -.02);
+  sheet.resize(layout, 150, 60);
+  sheet.update(bubbles);
+  assert.equal(sheet.needsAnimation, false);
+  assert.ok(sheet.deformation.every(value => value === 0));
+});
+
 // A second-hop spread would move the rightmost pocket; a whole-sheet spread
 // would move the isolated pocket. Neither shares the pressed pocket's weld.
 test('press tension reaches adjacent pockets but does not propagate twice or across empty sheet', () => {
@@ -54,8 +109,8 @@ test('one firm press gives visible local weld travel without activating neighbou
   sheet.update(bubbles);
   for(const index of sheet.neighbours[4]) {
     const offset=index*4;
-    assert.ok(Math.hypot(sheet.deformation[offset],sheet.deformation[offset+1])>0.0175,
-      'a firm press should move each adjacent weld by more than 1.75% of its radius');
+    assert.ok(Math.hypot(sheet.deformation[offset],sheet.deformation[offset+1])>0.026,
+      'a firm press should move adjacent welds enough to read at phone scale');
     assert.ok(tension(sheet,index)>0.075,'the adjacent shoulder should visibly relight');
     assert.equal(bubbles[index].active,false);assert.equal(bubbles[index].compression,0);
   }
@@ -121,7 +176,7 @@ test('multiple contacts stay subtle, reuse cached arrays, and never change pocke
   assert.equal(sheet.neighbours, neighbours);
   assert.deepEqual(bubbles.map(bubble => ({ ...bubble })), before);
   for (let index = 0; index < bubbles.length; index += 1) {
-    assert.ok(Math.hypot(deformation[index * 4], deformation[index * 4 + 1]) <= 0.050001);
+    assert.ok(Math.hypot(deformation[index * 4], deformation[index * 4 + 1]) <= SHEET_CONFIG.maximumOffset + .000001);
     assert.ok(tension(sheet, index) >= 0 && tension(sheet, index) <= 1);
     assert.ok(neighbours[index].length <= 6);
   }

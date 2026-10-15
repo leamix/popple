@@ -107,6 +107,10 @@ function tick(ms) {
   if(resizePending) {resizePending=false;resize();}
   const now=ms/1000,dt=Math.max(0,now-lastTime);lastTime=now;
   let active=false;
+  const sheetWasAnimating=renderer?.sheetState.needsAnimation;
+  renderer?.sheetState.stepContacts(dt,reduced);
+  active ||= renderer?.sheetState.needsAnimation ?? false;
+  if(sheetWasAnimating&&!active)renderDirty=true;
   for(let i=0;i<bubbles.length;i++) {
     const b=bubbles[i];
     const wasRefilling=b.refilling;
@@ -256,12 +260,20 @@ function hitBubble(event) {
 function releasePointer(pointerId) {
   const contact=pointers.get(pointerId);if(!contact)return;
   pointers.delete(pointerId);
+  renderer?.sheetState.releaseContact(pointerId);
   if(contact.index!==null)bubbles[contact.index].release();
   if(contact.capture?.hasPointerCapture(pointerId))contact.capture.releasePointerCapture(pointerId);
 }
 function movePointer(event) {
   const contact=pointers.get(event.pointerId);if(!contact)return;
   const index=hitBubble(event);
+  if(index<0&&renderer?.layout===layout) {
+    const rect=playground.getBoundingClientRect();
+    const x=event.clientX-rect.left,y=event.clientY-rect.top;
+    if(x>=0&&y>=0&&x<=rect.width&&y<=rect.height) {
+      renderer.sheetState.setContact(event.pointerId,x+renderer.field.x,y+renderer.field.y,event.pressure);
+    } else renderer.sheetState.releaseContact(event.pointerId);
+  } else renderer?.sheetState.releaseContact(event.pointerId);
   if(contact.index!==index) {
     if(contact.index!==null)bubbles[contact.index].release();
     contact.index=null;
