@@ -528,8 +528,9 @@ export class FilmRenderer {
     gl.enable(gl.BLEND);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);
     gl.clearColor(0,0,0,0);
   }
-  resize(width,height,dpr) {
+  resize(width,height,dpr,field={x:0,y:0,width,height}) {
     this.width=width;this.height=height;this.dpr=dpr;
+    this.field=field;
     this.layout=null;
     const pixelWidth=Math.round(width*dpr),pixelHeight=Math.round(height*dpr);
     if(this.canvas.width!==pixelWidth)this.canvas.width=pixelWidth;
@@ -552,8 +553,12 @@ export class FilmRenderer {
     const gl=this.gl,s=sheetBatched?this.sheetBatchUniforms:this.sheetUniforms,u=this.uniforms;
     if(this.layout!==layout) {
       this.layout=layout;
-      this.sheetState.resize(layout,this.width,this.height);
+      // Input and physics keep field-local positions; only drawing moves into
+      // the full-screen film. Empty header tiles draw the same connected skin.
+      this.renderLayout=layout.map(p=>({...p,x:p.x+this.field.x,y:p.y+this.field.y}));
+      this.sheetState.resize(this.renderLayout,this.width,this.height);
     }
+    layout=this.renderLayout;
     this.sheetState.update(bubbles,this.reducedMotion);
     const deformation=this.sheetState.deformation;
     gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);
@@ -604,10 +609,18 @@ export class FilmRenderer {
     gl.uniform1f(u.dark,dark?1:0);gl.uniform1f(u.time,time);
     gl.uniform2f(u.light,light.x,light.y);
     gl.uniform1f(u.light_angle,Number.isFinite(light.angle)?light.angle:0);
+    // The backing spans the screen, while cap rims stay inside the original
+    // playing field, just like its clipped DOM hit targets.
+    const field=this.field;
+    const left=Math.round(field.x*this.dpr),right=Math.round((field.x+field.width)*this.dpr);
+    const bottom=Math.round((this.height-field.y-field.height)*this.dpr);
+    const top=Math.round((this.height-field.y)*this.dpr);
+    gl.enable(gl.SCISSOR_TEST);gl.scissor(left,bottom,right-left,top-bottom);
     if(batched) {
       gl.viewport(0,0,this.canvas.width,this.canvas.height);
       gl.uniform2f(u.framebuffer,this.canvas.width,this.canvas.height);
       this.batch.draw(bubbles,layout,deformation,this.geometry,this.getMembrane,u);
+      gl.disable(gl.SCISSOR_TEST);
       return;
     }
     for(let i=0;i<bubbles.length;i++) {
@@ -628,5 +641,6 @@ export class FilmRenderer {
       gl.uniform2f(u.touch,b.x,-b.y);
       gl.drawArrays(gl.TRIANGLES,0,6);
     }
+    gl.disable(gl.SCISSOR_TEST);
   }
 }

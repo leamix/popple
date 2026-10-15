@@ -257,9 +257,10 @@ async function resizeScene(page, viewport) {
     const height = Math.abs((visualViewport?.scale ?? 1) - 1) < .01 && visualViewport?.height > 0
       ? Math.min(visualViewport.height, innerHeight) : innerHeight;
     const top = Math.abs((visualViewport?.scale ?? 1) - 1) < .01 ? Math.max(0, visualViewport?.offsetTop ?? 0) : 0;
-    const renderer=__filmRenderer;
+    const renderer=__filmRenderer,film=document.querySelector('#film').getBoundingClientRect();
     return Math.abs(stage.width - innerWidth) < .5 && Math.abs(stage.bottom - top - height) < 1
-      && Math.abs(renderer.width-stage.width)<.5 && Math.abs(renderer.height-stage.height)<.5
+      && Math.abs(renderer.width-film.width)<.5 && Math.abs(renderer.height-film.height)<.5
+      && Math.abs(renderer.field.y-(stage.y-film.y))<.5
       && renderer.layout===__filmLayout
       && __filmLayout.length === __bubbleStates.length && document.querySelectorAll('.bubble-target').length === __bubbleStates.length;
   });
@@ -279,7 +280,7 @@ async function captureFilmReflections(page, label, referenceLabel = null) {
     const snapshots=window.__filmPixelSnapshots??=new Map();
     const reference=referenceLabel?snapshots.get(referenceLabel):null;
     if(referenceLabel&&(!reference||reference.width!==width||reference.height!==height)) throw new Error('Reflection snapshots must use the same canvas geometry.');
-    const pockets=layout.map((p,index)=>{
+    const pockets=renderer.renderLayout.map((p,index)=>{
       let whitePixels=0,sumX=0,sumY=0,surfacePixels=0,changedPixels=0,totalDifference=0;
       const reach=p.radius*.9;
       for(let y=Math.max(0,Math.floor((p.y-reach)*dpr));y<Math.min(height,Math.ceil((p.y+reach)*dpr));y++) {
@@ -334,6 +335,52 @@ function assertReflectionOrbit(neutral, tilted) {
 
 try {
   const { page } = await context({ viewport: { width: 1365, height: 900 }, deviceScaleFactor: 1 });
+  await check('full-screen film continues beneath controls with bubbles confined to the field', async () => {
+    const details = [];
+    for (const viewport of [{ width: 1365, height: 900 }, { width: 390, height: 844 }]) {
+      await page.setViewportSize(viewport);
+      await page.waitForTimeout(250);
+      const result = await page.evaluate(() => {
+        const film = document.querySelector('#film').getBoundingClientRect();
+        const body = document.body.getBoundingClientRect();
+        const field = document.querySelector('.playground').getBoundingClientRect();
+        const renderer = __filmRenderer;
+        renderer.render(__bubbleStates, __filmLayout, __filmDark, __filmTime, __lastLight);
+        const gl = renderer.gl, pixels = new Uint8Array(renderer.canvas.width * renderer.canvas.height * 4);
+        gl.readPixels(0, 0, renderer.canvas.width, renderer.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        const batched = renderer.batchingEnabled, sheetBatched = renderer.sheetBatchingEnabled;
+        renderer.batchingEnabled = renderer.sheetBatchingEnabled = false;
+        renderer.render(__bubbleStates, __filmLayout, __filmDark, __filmTime, __lastLight);
+        const legacy = new Uint8Array(pixels.length);
+        gl.readPixels(0, 0, renderer.canvas.width, renderer.canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, legacy);
+        renderer.batchingEnabled = batched; renderer.sheetBatchingEnabled = sheetBatched;
+        let maximumFallbackDifference = 0;
+        for (let i = 0; i < pixels.length; i++) maximumFallbackDifference = Math.max(maximumFallbackDifference, Math.abs(pixels[i] - legacy[i]));
+        let reflectedPixels = 0;
+        for (let y = 0; y < Math.floor((field.top - body.top - 16) * renderer.dpr); y++) {
+          for (let x = 0; x < renderer.canvas.width; x++) {
+            if (pixels[((renderer.canvas.height - 1 - y) * renderer.canvas.width + x) * 4 + 3] > 0) reflectedPixels++;
+          }
+        }
+        return { film: { x: film.x, y: film.y, width: film.width, height: film.height },
+          body: { x: body.x, y: body.y, width: body.width, height: body.height }, reflectedPixels, maximumFallbackDifference,
+          targetsInField: [...document.querySelectorAll('.bubble-target')].every(button => button.getBoundingClientRect().top >= field.top),
+          controlsOnTop: ['.wordmark', '#theme', '#sound', '#settings-open', '#reset'].every(selector => {
+            const control = document.querySelector(selector), box = control.getBoundingClientRect();
+            return control.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+          }) };
+      });
+      assert.deepEqual(result.film, result.body, 'Film covers the whole visible app, including the header.');
+      assert.ok(result.reflectedPixels > 100, 'Actual WebGL film reflections are drawn above the bubble field.');
+      assert.ok(result.maximumFallbackDifference <= 2, 'The uniform fallback draws the same film and offset bubbles.');
+      assert.equal(result.targetsInField, true);
+      assert.equal(result.controlsOnTop, true);
+      details.push({ viewport, ...result });
+    }
+    await page.setViewportSize({ width: 1365, height: 900 });
+    await page.waitForTimeout(250);
+    return details;
+  });
   await check('adaptive desktop grid fills the viewport below the heading', async () => {
     const geometry = await inspectViewportField(page);
     assert.ok(geometry.count > 14, 'A desktop viewport receives more cells than the previous fixed scene.');
@@ -363,12 +410,12 @@ try {
       };
     });
     assert.deepEqual(filmMask, {
-      filmIsInsideSheet: true,
+      filmIsInsideSheet: false,
       targetsAreInsideSheet: true,
       burstsAreOutsideSheet: true,
       overflow: 'hidden',
       transform: 'none',
-    }, 'The unrotated film field clips the film and pockets, while burst effects remain free.');
+    }, 'The full-screen backing is separate from the clipped bubble targets, while burst effects remain free.');
     assert.ok(fieldPadding.horizontal >= 0 && fieldPadding.vertical >= 0, 'The outer cells remain inside the field.');
     await screenshot(page, 'desktop-dark.png');
     return { fieldPadding, ...await inspectStaggeredLayout(page) };

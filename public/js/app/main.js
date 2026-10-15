@@ -179,9 +179,11 @@ function updateViewportHeight() {
 }
 function resize() {
   const bounds=playground.getBoundingClientRect();
+  const filmBounds=$('#film').getBoundingClientRect();
   const width=Math.max(1,bounds.width),height=Math.max(1,bounds.height);
   const dpr=Math.min(devicePixelRatio||1,APP_CONFIG.maximumDevicePixelRatio);
-  const signature=`${width}:${height}:${diameter}:${dpr}`;
+  const field={x:bounds.left-filmBounds.left,y:bounds.top-filmBounds.top,width,height};
+  const signature=`${width}:${height}:${diameter}:${dpr}:${filmBounds.width}:${filmBounds.height}:${field.x}:${field.y}`;
   if(signature===lastGeometry)return;
   lastGeometry=signature;
   cancelAll();effects.clear();
@@ -224,7 +226,7 @@ function resize() {
     }
     poppedCount=bubbles.filter(b=>b.popped).length;
   }
-  renderer?.resize(width,height,dpr);
+  renderer?.resize(filmBounds.width,filmBounds.height,dpr,field);
   effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
   $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
   wake();
@@ -247,7 +249,7 @@ function coordinates(event,index) {
 function hitBubble(event) {
   const rect=playground.getBoundingClientRect();
   const x=event.clientX-rect.left,y=event.clientY-rect.top;
-  if(renderer?.layout===layout)return renderer.sheetState.hitIndex(x,y);
+  if(renderer?.layout===layout)return renderer.sheetState.hitIndex(x+renderer.field.x,y+renderer.field.y);
   // Before the first post-resize frame the new geometry has no hash yet.
   return layout.findIndex(p=>(x-p.x)*(x-p.x)+(y-p.y)*(y-p.y)<=p.radius*p.radius);
 }
