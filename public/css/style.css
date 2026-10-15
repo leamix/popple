@@ -41,7 +41,7 @@ html[data-theme="light"] .sheet { background: #dce5ed; }
 .bubble-haptic { position: absolute; margin: 0; opacity: 0; z-index: 1; clip-path: circle(50%); touch-action: none; cursor: pointer; }
 html[data-reduced="true"] .bubble-haptic { pointer-events: none; }
 .bubble-target:focus-visible { outline-offset: 8px; }
-html[data-input-modality="pointer"] .bubble-target:focus-visible { outline: none; }
+html[data-input-modality="pointer"] :is(button, a, input):focus-visible { outline: none; }
 .bubble-target[data-popped="true"] { cursor: grab; }
 .bubble-target[data-popped="true"]:active { cursor: grabbing; }
 .reset { position: relative; display: inline-block; padding: max(0px, calc(21px - .6em)) .4em max(0px, calc(21px - .3em)) 1em; border: 1px solid var(--muted); border-radius: 999px; background: var(--surface); color: var(--text); font: inherit; letter-spacing: inherit; line-height: inherit; white-space: nowrap; transition: background 150ms, transform 150ms; }
@@ -76,6 +76,7 @@ html[data-theme="light"] .switch-track { background: #b8c3cb; }
 html[data-theme="light"] .ios-switch input:checked + .switch-track { background: #34c759; }
 .ios-switch input:checked + .switch-track::after { transform: translateX(20px); }
 .ios-switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 4px; }
+html[data-input-modality="pointer"] .ios-switch input:focus-visible + .switch-track { outline: none; }
 .ios-switch input:disabled { cursor: default; }
 .ios-switch input:disabled + .switch-track { opacity: .55; }
 .permission-button { min-height: 44px; margin-top: 8px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 22px; background: transparent; font-size: 12px; transition: background 150ms ease-out; }

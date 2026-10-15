@@ -672,6 +672,24 @@ try {
 
   const { ctx: mobileContext, page: mobile } = await context({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const cdp = await mobileContext.newCDPSession(mobile);
+  await check('touch controls have no focus ring while keyboard controls keep one', async () => {
+    const outline = selector => mobile.locator(selector).evaluate(element => getComputedStyle(element).outlineStyle);
+    for (const selector of ['#theme', '#sound', '#reset', '#settings-open']) {
+      await mobile.locator(selector).tap();
+      assert.equal(await outline(selector), 'none', `${selector} shows a ring after touch`);
+      if (selector === '#theme' || selector === '#sound') await mobile.locator(selector).tap();
+      if (selector === '#settings-open') {
+        await mobile.locator('#tilt').tap();
+        assert.equal(await outline('#tilt + .switch-track'), 'none', 'switch shows a ring after touch');
+        await mobile.locator('#tilt').tap();
+        await mobile.locator('#settings-close').tap();
+        assert.equal(await outline('#settings-open'), 'none', 'dialog return shows a ring after touch');
+      }
+    }
+    await mobile.keyboard.press('Tab');
+    assert.equal(await mobile.evaluate(() => document.documentElement.dataset.inputModality), 'keyboard');
+    assert.notEqual(await mobile.evaluate(() => getComputedStyle(document.activeElement).outlineStyle), 'none');
+  });
   await check('mobile touch tap does not pop after release', async () => {
     const p = await center(mobile); await mobile.touchscreen.tap(p.x, p.y);
     await mobile.waitForTimeout(950); assert.equal(await count(mobile), 0);
