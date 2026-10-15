@@ -70,10 +70,22 @@ function pulse(duration) {
   try { navigator.vibrate(duration); } catch { /* Haptics are optional. */ }
 }
 
+function prepareAudioWhenIdle() {
+  if(!audio.enabled||audio.context||document.hidden)return;
+  const prepare=()=>{if(!document.hidden)audio.prepare();};
+  // Native audio-device startup can block for over 100ms. Pay that cost after
+  // the initial paint, while unlock/resume stays inside the trusted gesture.
+  if(typeof requestIdleCallback==='function')requestIdleCallback(prepare,{timeout:1000});
+  else requestAnimationFrame(()=>setTimeout(prepare,0));
+}
+
+function requestTick() {
+  if(!frame&&!document.hidden&&!contextLost) {lastTime=performance.now()/1000;frame=requestAnimationFrame(tick);}
+}
 function wake(seconds=APP_CONFIG.wakeSeconds) {
   renderDirty=true;
   animateUntil=Math.max(animateUntil,performance.now()/1000+seconds);
-  if(!frame&&!document.hidden&&!contextLost) {lastTime=performance.now()/1000;frame=requestAnimationFrame(tick);}
+  requestTick();
 }
 function updateBubbleButton(index) {
   const bubble=bubbles[index],button=buttons[index];
@@ -89,13 +101,16 @@ function updateBubbleButton(index) {
   if(hapticTargets[index])hapticTargets[index].disabled=reduced||bubble.refilling;
 }
 function tick(ms) {
-  frame=0;
-  if(document.hidden||contextLost) return;
+  if(document.hidden||contextLost) {frame=0;return;}
+  // Resizing clears canvas storage. Do it before this frame's draw and retain
+  // the current frame id so resize -> wake cannot queue a duplicate tick.
+  if(resizePending) {resizePending=false;resize();}
   const now=ms/1000,dt=Math.max(0,now-lastTime);lastTime=now;
   let active=false;
   for(let i=0;i<bubbles.length;i++) {
     const b=bubbles[i];
     const wasRefilling=b.refilling;
+    const wasAnimating=b.needsAnimation;
     if(b.step(dt,now)) {
       const p=layout[i];
       audio.pop();
@@ -111,12 +126,14 @@ function tick(ms) {
       poppedCount-=1;updateBubbleButton(i);renderDirty=true;
       if(!bubbles.some(bubble=>bubble.refilling))$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
     }
-    active ||= b.active||b.refilling;
+    const animating=b.needsAnimation;
+    if(wasAnimating&&!animating)renderDirty=true;
+    active ||= animating;
   }
   // Hidden cells settle during the resize wake period; their refills also
   // finish, so expanding later never replays an old collapse or pop pulse.
   for(const cell of bubbleCells.values())if(cell.index<0) {
-    cell.bubble.step(dt,now);active ||= cell.bubble.refilling;
+    cell.bubble.step(dt,now);active ||= cell.bubble.needsAnimation;
   }
   const ease=1-Math.exp(-dt*8);
   light.x+=(lightTarget.x-light.x)*ease;light.y+=(lightTarget.y-light.y)*ease;
@@ -125,7 +142,7 @@ function tick(ms) {
   if(renderer&&(renderDirty||active||now<animateUntil)) renderer.render(bubbles,layout,dark,now,light);
   renderDirty=false;
   const bursting=effects.render(now);
-  if(active||bursting||now<animateUntil) frame=requestAnimationFrame(tick);
+  frame=active||bursting||now<animateUntil?requestAnimationFrame(tick):0;
 }
 function cancelBubble(index) {
   for(const [pointerId,contact] of pointers) if(contact.index===index) releasePointer(pointerId);
@@ -138,8 +155,21 @@ function cancelAll() {
   for(const pointerId of pointers.keys())releasePointer(pointerId);
   wake();
 }
-let resizeFrame=0,lastGeometry='';
+let resizePending=false,lastGeometry='';
 const cellKey=p=>`${p.row}:${p.column}`;
+function updateViewportHeight() {
+  const viewport=window.visualViewport;
+  // Browser chrome can leave dvh taller than the visible viewport. Pinch zoom
+  // changes the visual viewport too, but must keep the existing sheet layout.
+  if(viewport&&Math.abs(viewport.scale-1)>.01)return;
+  const height=Math.min(window.innerHeight,viewport?.height??window.innerHeight);
+  if(Number.isFinite(height)&&height>0) {
+    const top=Number.isFinite(viewport?.offsetTop)?Math.max(0,viewport.offsetTop):0;
+    const style=document.documentElement.style,value=height+'px',offset=top+'px';
+    if(style.getPropertyValue('--app-height')!==value)style.setProperty('--app-height',value);
+    if(style.getPropertyValue('--app-top')!==offset)style.setProperty('--app-top',offset);
+  }
+}
 function resize() {
   const bounds=playground.getBoundingClientRect();
   const width=Math.max(1,bounds.width),height=Math.max(1,bounds.height);
@@ -147,28 +177,37 @@ function resize() {
   const signature=`${width}:${height}:${diameter}:${dpr}`;
   if(signature===lastGeometry)return;
   lastGeometry=signature;
-  const focusedIndex=buttons.indexOf(document.activeElement);
-  const focusedKey=focusedIndex<0?null:cellKey(layout[focusedIndex]);
   cancelAll();effects.clear();
   const geometry=createBubbleLayout(width,diameter,height);
   const nextLayout=geometry.layout;
   const changedCells=layout.length!==nextLayout.length||layout.some((p,i)=>cellKey(p)!==cellKey(nextLayout[i]));
-  for(const cell of bubbleCells.values()){cell.index=-1;cell.button.dataset.index=-1;}
-  bubbles.length=buttons.length=hapticTargets.length=0;
+  const focusedIndex=changedCells?buttons.indexOf(document.activeElement):-1;
+  const focusedKey=focusedIndex<0?null:cellKey(layout[focusedIndex]);
+  if(changedCells) {
+    for(const cell of bubbleCells.values())if(cell.index>=0){cell.index=-1;cell.button.dataset.index=-1;}
+    bubbles.length=buttons.length=hapticTargets.length=0;
+  }
   layout=nextLayout;
+  const size=geometry.diameter+'px';
   for(let i=0;i<layout.length;i++) {
-    const p=layout[i],key=cellKey(p);
-    if(!bubbleCells.has(key))bubbleCells.set(key,createBubbleCell());
-    const cell=bubbleCells.get(key),button=cell.button;
-    cell.index=i;cell.bubble.index=i;
-    bubbles.push(cell.bubble);buttons.push(button);
-    button.dataset.index=i;
-    Object.assign(button.style,{left:p.x-p.radius+'px',top:p.y-p.radius+'px',width:geometry.diameter+'px',height:geometry.diameter+'px'});
-    if(cell.haptic) {
-      cell.haptic.dataset.index=i;cell.haptic.style.cssText=button.style.cssText;
-      hapticTargets.push(cell.haptic);
+    const p=layout[i];
+    if(changedCells) {
+      const key=cellKey(p);
+      if(!bubbleCells.has(key))bubbleCells.set(key,createBubbleCell());
+      const cell=bubbleCells.get(key);
+      cell.index=i;cell.bubble.index=i;
+      bubbles.push(cell.bubble);buttons.push(cell.button);
+      cell.button.dataset.index=i;
+      if(cell.haptic){cell.haptic.dataset.index=i;hapticTargets.push(cell.haptic);}
+      updateBubbleButton(i);
     }
-    updateBubbleButton(i);
+    const button=buttons[i],left=p.x-p.radius+'px',top=p.y-p.radius+'px';
+    if(button.style.left!==left)button.style.left=left;
+    if(button.style.top!==top)button.style.top=top;
+    if(button.style.width!==size)button.style.width=size;
+    if(button.style.height!==size)button.style.height=size;
+    const haptic=hapticTargets[i];
+    if(haptic&&haptic.style.cssText!==button.style.cssText)haptic.style.cssText=button.style.cssText;
   }
   if(changedCells) {
     $('#targets').replaceChildren(...buttons,...hapticTargets);
@@ -176,15 +215,16 @@ function resize() {
       const restored=bubbleCells.get(focusedKey);
       (restored?.index>=0?restored.button:buttons[Math.min(focusedIndex,buttons.length-1)]).focus({preventScroll:true});
     }
+    poppedCount=bubbles.filter(b=>b.popped).length;
   }
-  poppedCount=bubbles.filter(b=>b.popped).length;
   renderer?.resize(width,height,dpr);
   effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
   $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
   wake();
 }
 function scheduleResize() {
-  if(!resizeFrame)resizeFrame=requestAnimationFrame(()=>{resizeFrame=0;resize();});
+  updateViewportHeight();
+  resizePending=true;requestTick();
 }
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
@@ -459,16 +499,19 @@ function setReduced(value) {
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));
 window.addEventListener('resize',scheduleResize);
+window.visualViewport?.addEventListener('resize',scheduleResize);
+window.visualViewport?.addEventListener('scroll',scheduleResize,{passive:true});
 if(typeof ResizeObserver==='function')new ResizeObserver(scheduleResize).observe(playground);
 window.addEventListener('blur',cancelAll);
 window.addEventListener('pagehide',cancelAll);
 document.addEventListener('visibilitychange',()=>{
-  cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else wake();
+  cancelAll();if(document.hidden){cancelAnimationFrame(frame);frame=0;}else {prepareAudioWhenIdle();wake();}
 });
 $('#film').addEventListener('webglcontextlost',event=>{event.preventDefault();cancelAll();contextLost=true;deviceLighting.setSuspended(true);cancelAnimationFrame(frame);frame=0;});
 $('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;deviceLighting.setSuspended(false);renderer.initialize();lastGeometry='';resize();});
 try { renderer=new FilmRenderer($('#film')); } catch(error) {
   console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
 }
-updateSound();setReduced(reduced);setTheme();resize();holdDuration=bubbles[0].holdDuration;updateHold();
+updateViewportHeight();updateSound();setReduced(reduced);setTheme();resize();holdDuration=bubbles[0].holdDuration;updateHold();
+prepareAudioWhenIdle();
 if(tiltWanted) deviceLighting.enable();

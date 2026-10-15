@@ -28,52 +28,70 @@ export class PopAudio {
     this.sources = new Set();
     this.output = null;
     this.limiter = null;
+    this.ceiling = null;
+    this.primed = false;
     this.disposed = false;
+  }
+
+  // Build the silent graph during idle time; playback still needs unlock().
+  prepare() {
+    if (!this.enabled || this.disposed) return false;
+    if (this.context) return true;
+    const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AudioContext) return false;
+    try {
+      this.context = new AudioContext({ latencyHint: 'interactive' });
+      this.output = this.context.createGain();
+      this.output.gain.value = 0.9;
+      this.limiter = this.context.createDynamicsCompressor();
+      this.limiter.threshold.value = -4;
+      this.limiter.knee.value = 3;
+      this.limiter.ratio.value = 16;
+      this.limiter.attack.value = 0.001;
+      this.limiter.release.value = 0.06;
+
+      // Keep single pops linear. Only overlapping peaks meet the soft knee;
+      // saturating the entire signal adds a gritty edge to headphone playback.
+      this.ceiling = this.context.createWaveShaper();
+      const curve = new Float32Array(2048);
+      for (let i = 0; i < curve.length; i++) {
+        const x = (i / (curve.length - 1)) * 2 - 1;
+        const magnitude = Math.abs(x);
+        const knee = 0.8;
+        curve[i] = Math.sign(x) * (magnitude <= knee ? magnitude :
+          knee + 0.16 * Math.tanh((magnitude - knee) / 0.16));
+      }
+      this.ceiling.curve = curve;
+      this.ceiling.oversample = '2x';
+      this.limiter.connect(this.ceiling);
+      this.ceiling.connect(this.output);
+      this.output.connect(this.context.destination);
+      this.primed = false;
+      return true;
+    } catch {
+      this.context?.close().catch(() => {});
+      this.context = this.output = this.limiter = this.ceiling = null;
+      this.primed = false;
+      return false;
+    }
   }
 
   // Call directly inside pointerdown/keydown; mobile Safari needs this gesture.
   unlock() {
-    if (!this.enabled || this.disposed) return Promise.resolve(false);
-    if (!this.context) {
-      const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
-      if (!AudioContext) return Promise.resolve(false);
+    if (!this.prepare()) return Promise.resolve(false);
+    if (!this.primed) {
       try {
-        this.context = new AudioContext({ latencyHint: 'interactive' });
-        this.output = this.context.createGain();
-        this.output.gain.value = 0.9;
-        this.limiter = this.context.createDynamicsCompressor();
-        this.limiter.threshold.value = -4;
-        this.limiter.knee.value = 3;
-        this.limiter.ratio.value = 16;
-        this.limiter.attack.value = 0.001;
-        this.limiter.release.value = 0.06;
-
-        // Keep single pops linear. Only overlapping peaks meet the soft knee;
-        // saturating the entire signal adds a gritty edge to headphone playback.
-        this.ceiling = this.context.createWaveShaper();
-        const curve = new Float32Array(2048);
-        for (let i = 0; i < curve.length; i++) {
-          const x = (i / (curve.length - 1)) * 2 - 1;
-          const magnitude = Math.abs(x);
-          const knee = 0.8;
-          curve[i] = Math.sign(x) * (magnitude <= knee ? magnitude :
-            knee + 0.16 * Math.tanh((magnitude - knee) / 0.16));
-        }
-        this.ceiling.curve = curve;
-        this.ceiling.oversample = '2x';
-        this.limiter.connect(this.ceiling);
-        this.ceiling.connect(this.output);
-        this.output.connect(this.context.destination);
-
         // A silent source primes older WebKit implementations without a beep.
         const silent = this.context.createBufferSource();
         silent.buffer = this.context.createBuffer(1, 1, this.context.sampleRate);
         silent.connect(this.output);
         silent.onended = () => silent.disconnect();
         silent.start();
+        this.primed = true;
       } catch {
         this.context?.close().catch(() => {});
-        this.context = null;
+        this.context = this.output = this.limiter = this.ceiling = null;
+        this.primed = false;
         return Promise.resolve(false);
       }
     }
@@ -140,6 +158,7 @@ export class BurstLayer {
     this.width = 0;
     this.height = 0;
     this.dpr = 1;
+    this.needsClear = false;
     this.serial = Math.floor(Math.random() * 4294967296);
     canvas.style.pointerEvents = 'none';
     canvas.setAttribute('aria-hidden', 'true');
@@ -149,8 +168,10 @@ export class BurstLayer {
     this.width = Math.max(1, cssWidth);
     this.height = Math.max(1, cssHeight);
     this.dpr = clamp(dpr, 1, 3);
-    this.canvas.width = Math.round(this.width * this.dpr);
-    this.canvas.height = Math.round(this.height * this.dpr);
+    const pixelWidth = Math.round(this.width * this.dpr), pixelHeight = Math.round(this.height * this.dpr);
+    if (this.canvas.width !== pixelWidth || this.canvas.height !== pixelHeight) this.needsClear = false;
+    if (this.canvas.width !== pixelWidth) this.canvas.width = pixelWidth;
+    if (this.canvas.height !== pixelHeight) this.canvas.height = pixelHeight;
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.context?.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -188,9 +209,12 @@ export class BurstLayer {
 
   render(timeSeconds = performance.now() / 1000) {
     const ctx = this.context;
-    if (!ctx) return false;
+    if (!ctx || (!this.bursts.length && !this.needsClear)) return false;
     ctx.clearRect(0, 0, this.width, this.height);
-    this.bursts = this.bursts.filter((burst) => timeSeconds - burst.start < burst.duration);
+    let retained = 0;
+    for (const burst of this.bursts) if (timeSeconds - burst.start < burst.duration) this.bursts[retained++] = burst;
+    this.bursts.length = retained;
+    this.needsClear = retained > 0;
     for (const burst of this.bursts) {
       const age = Math.max(0, timeSeconds - burst.start);
       const progress = clamp(age / burst.duration, 0, 1);
@@ -230,6 +254,7 @@ export class BurstLayer {
 
   clear() {
     this.bursts.length = 0;
-    this.context?.clearRect(0, 0, this.width, this.height);
+    if (this.needsClear) this.context?.clearRect(0, 0, this.width, this.height);
+    this.needsClear = false;
   }
 }

@@ -177,6 +177,38 @@ test('cached arrays and upload views survive frames; fold data is repacked only 
   assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[60], .25);
 });
 
+test('resizing unchanged visible rows retains permanent GPU membranes while refreshing cap rectangles', () => {
+  const gl = mockGL(), batch = new BubbleBatch(gl);
+  const states = [bubble(.1), { ...bubble(.2), popped: true, collapse: 1 }];
+  const shapes = [null, membrane(.25)], getMembrane = (_, index) => shapes[index];
+  render(batch, states, lattice(2), geometry(40, 40, 1), undefined, getMembrane);
+  const film = batch.membraneData, page = batch.pages[0];
+  const uploads = selectedCalls(gl, 'texSubImage2D').length;
+  const moved = [{ x: 11, y: 10, radius: 3 }, { x: 19, y: 10, radius: 3 }];
+  render(batch, states, moved, geometry(41, 43, 1), undefined, getMembrane);
+  assert.equal(selectedCalls(gl, 'texSubImage2D').length, uploads, 'a window resize must not reupload unchanged permanent folds');
+  assert.equal(batch.membraneData, film);
+  assert.equal(batch.pages[0], page);
+  assert.deepEqual(selectedCalls(gl, 'bufferSubData').at(-1).data.slice(0, 4), [7, 29, 8, 8]);
+  shapes[1] = membrane(.75);
+  render(batch, states, moved, geometry(41, 43, 1), undefined, getMembrane);
+  assert.equal(selectedCalls(gl, 'texSubImage2D').length, uploads + 1);
+  assert.equal(selectedCalls(gl, 'texSubImage2D').at(-1).data[60], .75, 'a later rupture still replaces its permanent data');
+});
+
+test('equal visible counts invalidate membrane rows when their ordered source indices change', () => {
+  const gl = mockGL(), batch = new BubbleBatch(gl);
+  const states = [.125, .25, .5].map(seed => ({ ...bubble(seed), popped: true, collapse: 1 }));
+  const shapes = states.map(state => membrane(state.seed)), getMembrane = (_, index) => shapes[index];
+  render(batch, states, [{ x: 10, y: 10, radius: 3 }, { x: 20, y: 10, radius: 3 },
+    { x: 80, y: 10, radius: 3 }], geometry(40, 40, 1), undefined, getMembrane);
+  render(batch, states, [{ x: -80, y: 10, radius: 3 }, { x: 20, y: 10, radius: 3 },
+    { x: 30, y: 10, radius: 3 }], geometry(40, 40, 1), undefined, getMembrane);
+  assert.deepEqual(Array.from(batch.indices), [1, 2]);
+  assert.equal(selectedCalls(gl, 'texSubImage2D').length, 2);
+  assert.deepEqual(selectedCalls(gl, 'texSubImage2D').at(-1).data.filter((_, index) => index % 60 === 0), [.25, .5]);
+});
+
 test('finishing individual refills does not upload unread wrinkle rows while other pockets stay collapsed', () => {
   const gl = mockGL(), batch = new BubbleBatch(gl);
   const states = Array.from({ length: 3 }, (_, index) => ({ ...bubble(index), popped: true, collapse: 1 }));

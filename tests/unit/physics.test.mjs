@@ -342,3 +342,62 @@ test('hold duration remains consistent from 10 to 120 frames per second', () => 
     assert.ok(bubble.collapse > 0.99);
   }
 });
+
+test('released bubbles still need frames after a slow frame and eventually settle without another pop', () => {
+  for (const popped of [false, true]) {
+    const bubble = new BubbleState(popped ? 41 : 40);
+    bubble.press(.75, -.3);
+    assert.equal(advance(bubble, popped ? .8 : .12), Number(popped));
+    bubble.release();
+    assert.equal(bubble.step(2, 200), false, 'a long wall-clock frame advances only capped spring time');
+    assert.equal(bubble.active, false);
+    assert.equal(bubble.refilling, false);
+    assert.equal(bubble.needsAnimation, true, 'released deformation must keep requesting simulation frames');
+    let frames = 0, events = 0;
+    while (bubble.needsAnimation && frames < 1000) {
+      events += Number(bubble.step(.2, 200 + ++frames * .2));
+    }
+    assert.ok(frames > 0 && frames < 1000, 'settling completes without scheduling frames forever');
+    assert.equal(events, 0);
+    assert.equal(bubble.needsAnimation, false);
+    assert.equal(bubble.x, 0);
+    assert.equal(bubble.y, 0);
+    assert.equal(bubble.compression, popped ? .06 : 0);
+    assert.equal(bubble.bulge, 0);
+    assert.ok(Math.abs(bubble.collapse - Number(popped)) < .0001);
+    advance(bubble, 1);
+    assert.equal(bubble.needsAnimation, false, 'a settled old pop age cannot keep animation alive');
+  }
+});
+
+test('active contacts and delayed refills request animation until reset or completed inflation', () => {
+  const bubble = new BubbleState(42);
+  assert.equal(bubble.needsAnimation, false);
+  bubble.press(0, 0);
+  assert.equal(bubble.needsAnimation, true);
+  assert.equal(advance(bubble, .8), 1);
+  bubble.release();
+  assert.equal(bubble.startRefill(.3, .4), true);
+  assert.equal(bubble.needsAnimation, true);
+  advance(bubble, .2);
+  assert.equal(bubble.needsAnimation, true, 'a refill remains scheduled during its random delay');
+  advance(bubble, .6);
+  assert.equal(bubble.needsAnimation, false);
+  bubble.press(.5, -.5);
+  bubble.reset();
+  assert.equal(bubble.needsAnimation, false);
+});
+
+test('the early collapse clamp cannot end animation before its remaining rebound settles', () => {
+  const bubble = new BubbleState(43);
+  bubble.popped = true;
+  bubble.compression = .06;
+  bubble.collapse = 1;
+  bubble.popAge = .1;
+  assert.equal(bubble.needsAnimation, true, 'a temporary full collapse still has a later visible rebound');
+  assert.equal(advance(bubble, .15), 0);
+  assert.ok(bubble.collapse < 1, 'the analytic collapse actually rebounds after its first clamp');
+  assert.equal(bubble.needsAnimation, true);
+  advance(bubble, 1);
+  assert.equal(bubble.needsAnimation, false);
+});

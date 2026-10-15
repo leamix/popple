@@ -41,8 +41,14 @@ function mockGL({ float = true, maxTexture = 4096, maxAttributes = 8 } = {}) {
 
 const selected = (gl, name) => gl.calls.filter(call => call.name === name);
 const uploads = gl => gl.calls.filter(call => (call.name === 'texImage2D' || call.name === 'texSubImage2D') && call.data);
-const staticUploads = gl => uploads(gl).filter(upload => upload.name === 'texImage2D');
-const dynamicUploads = gl => uploads(gl).filter(upload => upload.name === 'texSubImage2D');
+const staticUploads = gl => {
+  const textures = new Set(uploads(gl).filter(upload => upload.name === 'texImage2D').map(upload => upload.texture));
+  return uploads(gl).filter(upload => textures.has(upload.texture));
+};
+const dynamicUploads = gl => {
+  const sites = new Set(staticUploads(gl).map(upload => upload.texture));
+  return uploads(gl).filter(upload => !sites.has(upload.texture));
+};
 const vertexUploads = gl => gl.calls.filter(call => (call.name === 'bufferData' || call.name === 'bufferSubData') && call.data);
 const textureWidth = upload => upload.args[upload.name === 'texImage2D' ? 3 : 4];
 const textureHeight = upload => upload.args[upload.name === 'texImage2D' ? 4 : 5];
@@ -194,6 +200,40 @@ test('geometry changes rebuild pixel bounds and tile or layout changes rebuild s
   tiles = [tile(0, 0, 10, 10)];
   render(batch, bubbles, layout, tiles, geometry(10, 10, 2));
   assert.ok(verticesByTile(gl).at(-1).every(vertex => vertex[3] === 0));
+});
+
+test('resizing equal tile pages reuses textures and uploads only changed site coordinates', () => {
+  const gl = mockGL(), batch = new SheetBatch(gl), bubbles = [{ collapse: .25 }];
+  render(batch, bubbles, [{ x: 4, y: 6, radius: 2 }], [tile(0, 0, 10, 10, [0])], geometry(10, 10, 1));
+  const textures = selected(gl, 'createTexture').map(call => call.result);
+  const linkUploads = dynamicUploads(gl).length, allocationCount = selected(gl, 'bufferData').length;
+  render(batch, bubbles, [{ x: 5, y: 6, radius: 2 }], [tile(0, 0, 11, 12, [0])], geometry(11, 12, 1));
+  assert.equal(selected(gl, 'createTexture').length, 2, 'equal row counts retain both allocated textures');
+  assert.equal(selected(gl, 'deleteTexture').length, 0);
+  assert.equal(staticUploads(gl).at(-1).texture, textures[0]);
+  assert.equal(staticUploads(gl).at(-1).name, 'texSubImage2D');
+  assert.deepEqual(staticUploads(gl).at(-1).data.slice(0, 4), [5, 6, 2, 0]);
+  assert.equal(dynamicUploads(gl).length, linkUploads, 'unchanged source mapping preserves dynamic GPU links');
+  assert.equal(selected(gl, 'bufferData').length, allocationCount, 'equal vertex counts update existing buffer storage');
+  assert.equal(Math.max(...verticesByTile(gl).at(-1).map(vertex => vertex[1])), 12);
+  const siteUploads = staticUploads(gl).length;
+  render(batch, bubbles, [{ x: 5, y: 6, radius: 2 }], [tile(0, 0, 11, 12, [0])], geometry(11, 12, 2));
+  assert.equal(staticUploads(gl).length, siteUploads, 'DPR changes update vertices without uploading unchanged CSS sites');
+});
+
+test('reused tile textures refresh remapped local links even when bubble values are unchanged', () => {
+  const gl = mockGL(), batch = new SheetBatch(gl), bubbles = [{ collapse: .25 }, { collapse: .75 }];
+  const layout = [{ x: 4, y: 6, radius: 2 }, { x: 14, y: 6, radius: 2 }];
+  render(batch, bubbles, layout, [tile(0, 0, 20, 10, [0, 1])], geometry(20, 10, 1));
+  render(batch, bubbles, layout, [tile(0, 0, 20, 10, [1, 0])], geometry(20, 10, 1));
+  assert.equal(selected(gl, 'createTexture').length, 2);
+  assert.equal(dynamicUploads(gl).length, 2);
+  assert.deepEqual(dynamicUploads(gl).at(-1).data.slice(0, 8), [0, 0, 0, .75, 0, 0, 0, .25]);
+  render(batch, bubbles, layout, [tile(0, 0, 10, 10, [0]), tile(10, 0, 10, 10, [1])], geometry(20, 10, 1));
+  assert.equal(selected(gl, 'createTexture').length, 4, 'changed page dimensions receive correctly sized replacement textures');
+  assert.equal(selected(gl, 'deleteTexture').length, 2);
+  assert.equal(textureHeight(dynamicUploads(gl).at(-1)), 2);
+  assert.equal(dynamicUploads(gl).at(-1).data[99], .75);
 });
 
 test('100, 500 and 1000 sites page mobile tiles into bounded ordinary draws on a small texture device', () => {

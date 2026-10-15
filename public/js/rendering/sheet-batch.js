@@ -46,9 +46,7 @@ export class SheetBatch {
     this.width = geometry.width; this.height = geometry.height; this.dpr = geometry.dpr;
     this.framebufferWidth = geometry.framebufferWidth; this.framebufferHeight = geometry.framebufferHeight;
     const gl = this.gl;
-    for (const page of this.pages) {
-      gl.deleteTexture(page.texture); gl.deleteTexture(page.linkTexture);
-    }
+    const previousPages = this.pages;
     this.pages = [];
     const rectangles = [];
     for (const tile of tiles) {
@@ -59,11 +57,16 @@ export class SheetBatch {
       // retaining empty site lists for every tile that does cover pixels.
       if (right > left && top > bottom) rectangles.push({ left, right, bottom, top, tile });
     }
-    const vertices = new Float32Array(rectangles.length * 6 * VERTEX_STRIDE);
+    const vertexLength = rectangles.length * 6 * VERTEX_STRIDE;
+    const reuseVertices = this.vertices?.length === vertexLength;
+    const vertices = reuseVertices ? this.vertices : new Float32Array(vertexLength);
     for (let start = 0; start < rectangles.length; start += this.maximumTexture) {
       const count = Math.min(this.maximumTexture, rectangles.length - start);
-      const sites = new Float32Array(count * MAX_SHEET_SITES * 4);
-      const sources = new Int32Array(count * MAX_SHEET_SITES).fill(-1);
+      const previous = previousPages[this.pages.length];
+      const reusePage = previous?.count === count;
+      const sites = reusePage ? previous.sites : new Float32Array(count * MAX_SHEET_SITES * 4);
+      const sources = reusePage ? previous.sources : new Int32Array(count * MAX_SHEET_SITES).fill(-1);
+      let sitesChanged = false, mappingChanged = !reusePage;
       for (let row = 0; row < count; row++) {
         const { left, right, bottom, top, tile } = rectangles[start + row];
         for (let vertex = 0; vertex < 6; vertex++) {
@@ -73,25 +76,50 @@ export class SheetBatch {
           vertices[offset + 2] = row + .5;
           vertices[offset + 3] = tile.indices.length;
         }
-        for (let site = 0; site < tile.indices.length; site++) {
-          const index = tile.indices[site], position = layout[index];
+        for (let site = 0; site < MAX_SHEET_SITES; site++) {
+          const index = site < tile.indices.length ? tile.indices[site] : -1;
+          const position = index < 0 ? null : layout[index];
           const offset = (row * MAX_SHEET_SITES + site) * 4;
-          sites[offset] = position.x; sites[offset + 1] = position.y;
-          sites[offset + 2] = position.radius; sites[offset + 3] = index;
-          sources[row * MAX_SHEET_SITES + site] = index * 4;
+          const x = position ? Math.fround(position.x) : 0, y = position ? Math.fround(position.y) : 0;
+          const radius = position ? Math.fround(position.radius) : 0, identity = position ? index : 0;
+          if (sites[offset] !== x || sites[offset + 1] !== y
+            || sites[offset + 2] !== radius || sites[offset + 3] !== identity) sitesChanged = true;
+          sites[offset] = x; sites[offset + 1] = y;
+          sites[offset + 2] = radius; sites[offset + 3] = identity;
+          const source = position ? index * 4 : -1, sourceOffset = row * MAX_SHEET_SITES + site;
+          if (sources[sourceOffset] !== source) mappingChanged = true;
+          sources[sourceOffset] = source;
         }
       }
-      const texture = this.createTexture();
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MAX_SHEET_SITES, count, 0, gl.RGBA, gl.FLOAT, sites);
-      const linkTexture = this.createTexture();
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MAX_SHEET_SITES, count, 0, gl.RGBA, gl.FLOAT, null);
-      this.pages.push({ start, count, texture, linkTexture, sources,
-        links: new Float32Array(sites.length), uploaded: false });
+      if (reusePage) {
+        if (sitesChanged) {
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, previous.texture);
+          gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MAX_SHEET_SITES, count, gl.RGBA, gl.FLOAT, sites);
+        }
+        if (mappingChanged) { previous.links.fill(0); previous.uploaded = false; }
+        this.pages.push(previous);
+      } else {
+        if (previous) { gl.deleteTexture(previous.texture); gl.deleteTexture(previous.linkTexture); }
+        const texture = this.createTexture();
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MAX_SHEET_SITES, count, 0, gl.RGBA, gl.FLOAT, sites);
+        const linkTexture = this.createTexture();
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, MAX_SHEET_SITES, count, 0, gl.RGBA, gl.FLOAT, null);
+        this.pages.push({ start, count, texture, linkTexture, sites, sources,
+          links: new Float32Array(sites.length), uploaded: false });
+      }
+    }
+    for (let page = this.pages.length; page < previousPages.length; page++) {
+      gl.deleteTexture(previousPages[page].texture); gl.deleteTexture(previousPages[page].linkTexture);
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
-    this.links = new Float32Array(layout.length * 4);
-    this.linksUploaded = false;
+    if (reuseVertices) gl.bufferSubData(gl.ARRAY_BUFFER, 0, vertices);
+    else gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+    this.vertices = vertices;
+    if (this.links.length !== layout.length * 4) {
+      this.links = new Float32Array(layout.length * 4);
+      this.linksUploaded = false;
+    }
   }
 
   draw(bubbles, layout, deformation, tiles, geometry, uniforms) {
@@ -120,7 +148,7 @@ export class SheetBatch {
     try {
       for (const page of this.pages) {
         let pageDirty = !page.uploaded;
-        if (dirty) for (let record = 0; record < page.sources.length; record++) {
+        if (dirty || pageDirty) for (let record = 0; record < page.sources.length; record++) {
           const source = page.sources[record];
           if (source < 0) continue;
           const offset = record * 4;

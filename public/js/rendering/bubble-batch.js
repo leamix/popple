@@ -137,18 +137,25 @@ export class BubbleBatch {
     for (let index = 0; index < layout.length; index++) {
       if (bubbleVisible(layout[index], geometry.width, geometry.height)) count++;
     }
-    this.indices = new Uint32Array(count);
-    this.rects = new Float32Array(count * 4);
-    this.membraneData = new Float32Array(count * MEMBRANE_STRIDE);
-    this.membranes = new Array(count).fill(null);
+    let sameRows = this.indices.length === count;
+    if (!sameRows) {
+      this.indices = new Uint32Array(count);
+      this.rects = new Float32Array(count * 4);
+    }
     let visible = 0;
     for (let index = 0; index < layout.length; index++) {
       const position = layout[index];
       if (!bubbleVisible(position, geometry.width, geometry.height)) continue;
+      if (this.indices[visible] !== index) sameRows = false;
       this.indices[visible] = index;
       packBubbleRect(this.rects, visible * 4, position, geometry);
       visible++;
     }
+    // Window geometry changes the cap rectangles, not its permanent folds.
+    // Keep row identities and upload views until visibility actually remaps.
+    if (sameRows) return;
+    this.membraneData = new Float32Array(count * MEMBRANE_STRIDE);
+    this.membranes = new Array(count).fill(null);
     this.grow(count);
     this.growTexture(count);
     this.chunks = [];

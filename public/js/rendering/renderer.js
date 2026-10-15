@@ -531,7 +531,9 @@ export class FilmRenderer {
   resize(width,height,dpr) {
     this.width=width;this.height=height;this.dpr=dpr;
     this.layout=null;
-    this.canvas.width=Math.round(width*dpr);this.canvas.height=Math.round(height*dpr);
+    const pixelWidth=Math.round(width*dpr),pixelHeight=Math.round(height*dpr);
+    if(this.canvas.width!==pixelWidth)this.canvas.width=pixelWidth;
+    if(this.canvas.height!==pixelHeight)this.canvas.height=pixelHeight;
     this.geometry={width,height,dpr,framebufferWidth:this.canvas.width,framebufferHeight:this.canvas.height};
   }
   membraneFor(bubble,index) {

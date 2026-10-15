@@ -6,6 +6,11 @@ const HOLD_PRESSURE_RATIO = MIN_HOLD_SECONDS / DEFAULT_HOLD_SECONDS;
 const FILM_REST_COMPRESSION = PHYSICS_CONFIG.settledCompression;
 const MAX_FRAME_SECONDS = PHYSICS_CONFIG.maximumFrameSeconds;
 const MAX_HOLD_FRAME_SECONDS = PHYSICS_CONFIG.maximumHoldFrameSeconds;
+// The damped collapse can briefly clamp to 1 before rebounding. Its envelope
+// bounds every remaining ripple, so a temporary clamp cannot end animation.
+const COLLAPSE_SETTLE_SECONDS = Math.log(Math.hypot(1,
+  PHYSICS_CONFIG.collapse.decay / PHYSICS_CONFIG.collapse.frequency) / PHYSICS_CONFIG.settleEpsilon)
+  / PHYSICS_CONFIG.collapse.decay;
 
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
@@ -175,6 +180,16 @@ export class BubbleState {
     this._targetX = this._targetY = 0;
     this._heldSeconds = 0;
     if (!this.popped) this.holdProgress = 0;
+  }
+
+  get needsAnimation() {
+    const epsilon = PHYSICS_CONFIG.settleEpsilon;
+    return this.active || this.refilling
+      || this.x * this.x + this.y * this.y >= epsilon * epsilon
+      || Math.abs(this.compression - (this.popped ? FILM_REST_COMPRESSION : 0)) >= epsilon
+      || Math.abs(this.bulge) >= epsilon
+      || Math.abs(this.collapse - (this.popped ? 1 : 0)) >= epsilon
+      || (this.popped && this.popAge < COLLAPSE_SETTLE_SECONDS);
   }
 
   /**

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_FILM_SCALE, FILM_GAP, STAGE_PADDING, createBubbleLayout } from '../../public/js/core/layout.js';
+import { MAX_FILM_SCALE, FILM_GAP, COMPACT_SIDE_GAP, createBubbleLayout } from '../../public/js/core/layout.js';
 
 const close = (actual, expected, tolerance = 1e-8) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} should equal ${expected}`);
 
@@ -9,6 +9,28 @@ const bounds = ({ layout, visualRadius }) => ({
   right: Math.max(...layout.map(pocket => pocket.x + visualRadius)),
   top: Math.min(...layout.map(pocket => pocket.y - visualRadius)),
   bottom: Math.max(...layout.map(pocket => pocket.y + visualRadius)),
+});
+
+test('the first film rim starts at the field top without an extra inset or centring band', () => {
+  for (const [width, height] of [[320, 520], [390, 600], [725, 600], [1440, 800]]) {
+    const result = createBubbleLayout(width, 84, height);
+    close(bounds(result).top, 0);
+  }
+});
+
+test('phone rows retain a small side gap around their complete film rims', () => {
+  for (const width of [320, 390]) {
+    const result = createBubbleLayout(width, 84, 600);
+    const { left, right } = bounds(result);
+    close(left, 12);
+    close(width - right, 12);
+    assert.equal(result.layout.filter(pocket => pocket.row === 1).length, 4);
+  }
+});
+
+test('desktop row capacity uses the full field width', () => {
+  const result = createBubbleLayout(725, 84, 600);
+  assert.equal(result.layout.filter(pocket => pocket.row === 1).length, 7);
 });
 
 test('compact screens retain four-column density and add pockets beyond the original fourteen', () => {
@@ -27,15 +49,15 @@ test('fractional compact widths retain the complete fourth column without clippe
       const result = createBubbleLayout(width, requestedDiameter, 680);
       assert.equal(result.layout.filter(pocket => pocket.row === 1).length, 4);
       const { left, right } = bounds(result);
-      assert.ok(left >= STAGE_PADDING - 1e-8);
-      assert.ok(right <= width - STAGE_PADDING + 1e-8);
+      assert.ok(left >= COMPACT_SIDE_GAP - 1e-8);
+      assert.ok(right <= width - COMPACT_SIDE_GAP + 1e-8);
     }
   }
 });
 
 // Wrong capacity calculations would leave complete rows or columns unused.
 test('desktop, mobile and landscape pack the complete available rectangle', () => {
-  for (const [width, height, count] of [[1440, 800, 108], [390, 600, 24], [844, 260, 15]]) {
+  for (const [width, height, count] of [[1440, 800, 121], [390, 600, 24], [844, 260, 15]]) {
     const result = createBubbleLayout(width, 84, height);
     assert.equal(result.width, width);
     assert.equal(result.height, height);
@@ -60,7 +82,7 @@ test('rows alternate short then long with centred, evenly spaced hexagonal packi
   const result = createBubbleLayout(640, 84, 480);
   const { layout, width, pitch, rowPitch } = result;
   const rows = [...Map.groupBy(layout, pocket => pocket.row).values()];
-  assert.deepEqual(rows.map(row => row.length), [5, 6, 5, 6]);
+  assert.deepEqual(rows.map(row => row.length), [5, 6, 5, 6, 5]);
   rows.forEach((pockets, row) => {
     close(pockets.reduce((sum, pocket) => sum + pocket.x, 0) / pockets.length, width / 2);
     assert.deepEqual(pockets.map(pocket => pocket.column), Array.from({ length: pockets.length }, (_, column) => column));
@@ -73,17 +95,17 @@ test('rows alternate short then long with centred, evenly spaced hexagonal packi
   close(rowPitch / pitch, Math.sqrt(3) / 2);
 });
 
-test('every rim stays padded and every pair keeps the film gap', () => {
+test('every complete rim stays inside the field and every pair keeps the film gap', () => {
   for (const [width, height] of [[320, 520], [390, 600], [844, 260], [1440, 800], [120, 480]]) {
     for (const requestedDiameter of [64, 84, 100]) {
       const result = createBubbleLayout(width, requestedDiameter, height);
       assert.ok(result.diameter <= requestedDiameter);
       for (const pocket of result.layout) {
         const reach = pocket.radius * MAX_FILM_SCALE;
-        assert.ok(pocket.x - reach >= STAGE_PADDING - 1e-8);
-        assert.ok(pocket.x + reach <= width - STAGE_PADDING + 1e-8);
-        assert.ok(pocket.y - reach >= STAGE_PADDING - 1e-8);
-        assert.ok(pocket.y + reach <= height - STAGE_PADDING + 1e-8);
+        assert.ok(pocket.x - reach >= -1e-8);
+        assert.ok(pocket.x + reach <= width + 1e-8);
+        assert.ok(pocket.y - reach >= -1e-8);
+        assert.ok(pocket.y + reach <= height + 1e-8);
       }
       for (let a = 0; a < result.layout.length; a++) {
         for (let b = a + 1; b < result.layout.length; b++) {
@@ -98,14 +120,15 @@ test('every rim stays padded and every pair keeps the film gap', () => {
   }
 });
 
-test('packing centres its unused space and cannot fit another complete row or column', () => {
+test('packing centres rows and leaves only an incomplete row below the last rim', () => {
   for (const [width, height] of [[320, 520], [390, 600], [844, 260], [1440, 800], [120, 480]]) {
     const result = createBubbleLayout(width, 84, height);
     const { left, right, top, bottom } = bounds(result);
+    const sideGap = width <= 640 ? COMPACT_SIDE_GAP : 0;
     close(left, width - right);
-    close(top, height - bottom);
-    assert.ok(left + width - right - STAGE_PADDING * 2 < result.pitch + 1e-8);
-    assert.ok(top + height - bottom - STAGE_PADDING * 2 < result.rowPitch + 1e-8);
+    close(top, 0);
+    assert.ok(left + width - right - sideGap * 2 < result.pitch + 1e-8);
+    assert.ok(height - bottom < result.rowPitch + 1e-8);
   }
 });
 
@@ -113,7 +136,7 @@ test('one-row regions use all columns and one-column regions keep vertical film 
   const singleRow = createBubbleLayout(640, 84, 140);
   assert.equal(singleRow.layout.length, 6);
   assert.ok(singleRow.layout.every(pocket => pocket.row === 0));
-  const singleColumn = createBubbleLayout(140, 84, 480);
+  const singleColumn = createBubbleLayout(120, 84, 480);
   assert.equal(singleColumn.layout.length, 4);
   assert.ok(singleColumn.layout.every(pocket => pocket.column === 0));
   close(singleColumn.layout[1].y - singleColumn.layout[0].y, singleColumn.pitch);
@@ -133,16 +156,16 @@ test('row and column identities stay unique and reusable after dimensions change
 });
 
 test('narrow regions keep useful targets and short regions cap their diameter', () => {
-  close(createBubbleLayout(140, 84, 140).diameter, 84);
+  close(createBubbleLayout(120, 84, 140).diameter, 84);
   for (const width of [140, 200, 240, 320]) {
     assert.ok(createBubbleLayout(width, 84, 480).diameter >= 44);
   }
-  for (const [width, height] of [[120, 480], [640, 100]]) {
+  for (const [width, height] of [[100, 480], [640, 80]]) {
     const result = createBubbleLayout(width, 84, height);
     assert.ok(result.diameter > 0 && result.diameter < 84);
     const { left, right, top, bottom } = bounds(result);
-    assert.ok(left >= STAGE_PADDING - 1e-8 && right <= width - STAGE_PADDING + 1e-8);
-    assert.ok(top >= STAGE_PADDING - 1e-8 && bottom <= height - STAGE_PADDING + 1e-8);
+    assert.ok(left >= 0 && right <= width);
+    assert.ok(top >= 0 && bottom <= height);
   }
 });
 
@@ -162,7 +185,7 @@ test('missing and invalid dimensions and diameters use finite defaults', () => {
   const fallback = createBubbleLayout();
   assert.equal(fallback.width, 390);
   assert.equal(fallback.height, 680);
-  assert.ok(fallback.diameter > 74 && fallback.diameter < 75);
+  assert.ok(fallback.diameter > 77 && fallback.diameter < 78);
   assert.equal(fallback.layout.length, 28);
   for (const invalid of [0, -1, NaN, Infinity, -Infinity, null, '390']) {
     assert.deepEqual(createBubbleLayout(invalid, invalid, invalid), fallback);

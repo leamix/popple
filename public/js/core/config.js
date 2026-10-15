@@ -48,7 +48,8 @@ export const BURST_CONFIG = freeze({
 export const LAYOUT_CONFIG = freeze({
   maximumFilmScale: 1.085 * 1.05,
   filmGap: 4,
-  stagePadding: 20,
+  compactSideGap: 12,
+  compactViewportWidth: 640,
   fallbackViewportWidth: 390,
   fallbackViewportHeight: 680,
   defaultBubbleDiameter: 84,

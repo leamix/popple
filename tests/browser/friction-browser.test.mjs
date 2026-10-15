@@ -56,10 +56,10 @@ const rendererInstrumented = rendererSource.replace('render(bubbles,layout,dark,
 assert.notEqual(rendererSource, rendererInstrumented);
 const contexts = [];
 async function context(options = {}, targetBrowser = browser) {
-  const { hold = .24, ...browserOptions } = options;
+  const { hold = .24, probeAudioPreparation = false, ...browserOptions } = options;
   const ctx = await targetBrowser.newContext({ viewport: { width: 390, height: 844 }, ...browserOptions });
   contexts.push(ctx);
-  await ctx.addInitScript(({ hold }) => {
+  await ctx.addInitScript(({ hold, probeAudioPreparation }) => {
     localStorage.setItem('bubble.hold', String(hold));
     localStorage.setItem('bubble.sound', 'true');
     localStorage.setItem('bubble.tilt', 'false');
@@ -69,7 +69,22 @@ async function context(options = {}, targetBrowser = browser) {
       __hapticCalls.push({ duration, active: (window.__bubbleStates ?? []).flatMap((b, index) => b.active ? [index] : []) });
       return true;
     } });
-  }, { hold });
+    if (probeAudioPreparation) {
+      window.__audioSourceStarts = [];
+      window.__trustedAudioActivations = [];
+      for (const type of ['pointerdown', 'mousedown', 'touchstart', 'keydown', 'click']) {
+        window.addEventListener(type, event => { if (event.isTrusted) __trustedAudioActivations.push(type); }, true);
+      }
+      for (const Source of [window.AudioBufferSourceNode, window.OscillatorNode]) if (Source) {
+        const start = Source.prototype.start;
+        Source.prototype.start = function(...args) {
+          __audioSourceStarts.push({ trustedActivation: __trustedAudioActivations.length > 0,
+            time: performance.now(), contextTime: this.context.currentTime, duration: this.buffer?.duration });
+          return start.apply(this, args);
+        };
+      }
+    }
+  }, { hold, probeAudioPreparation });
   await ctx.route('**/js/app/main.js', route => route.fulfill({ contentType: 'text/javascript', body: appInstrumented }));
   await ctx.route('**/js/rendering/renderer.js', route => route.fulfill({ contentType: 'text/javascript', body: rendererInstrumented }));
   const page = await ctx.newPage();
@@ -114,8 +129,8 @@ const popped = page => page.evaluate(() => __bubbleStates.flatMap((b, index) => 
 const active = page => page.evaluate(() => __bubbleStates.flatMap((b, index) => b.active ? [index] : []));
 const haptics = page => page.evaluate(() => __hapticCalls);
 const waitPopped = (page, index) => page.waitForFunction(i => __bubbleStates[i].popped, index, { timeout: 1800 });
-async function analyse(page) {
-  await page.waitForFunction(() => __interactionAudio.context?.state === 'running');
+async function analyse(page, { waitForRunning = true } = {}) {
+  if (waitForRunning) await page.waitForFunction(() => __interactionAudio.context?.state === 'running');
   await page.evaluate(() => {
     const analyser = __interactionAudio.context.createAnalyser();
     analyser.fftSize = 2048;
@@ -243,6 +258,44 @@ async function firstRefillTouchScenario(targetBrowser = browser) {
   return { nativeHapticTargets: native, redirected, direct };
 }
 
+async function stableResizeHapticsScenario(targetBrowser) {
+  const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
+  await page.locator('#settings-open').tap();
+  await page.locator('#motion').check();
+  await page.locator('#settings-close').tap();
+  const before = await page.evaluate(() => {
+    window.__stableResizeNodes = [...document.querySelectorAll('#targets > *')];
+    window.__stableResizeStyles = __stableResizeNodes.map(node => node.style.cssText);
+    window.__stableResizeMutations = [];
+    window.__stableResizeObserver = new MutationObserver(records => {
+      __stableResizeMutations.push(...records.map(record => ({ type: record.type, attribute: record.attributeName })));
+    });
+    __stableResizeObserver.observe(document.querySelector('#targets'), { childList: true, subtree: true, attributes: true,
+      attributeFilter: ['data-index', 'aria-label', 'aria-busy', 'aria-disabled', 'disabled'] });
+    return { keys: __interactionRenderer.layout.map(p => `${p.row}:${p.column}`),
+      haptics: [...document.querySelectorAll('.bubble-haptic')].map(input => input.disabled),
+      diameter: document.querySelector('.bubble-target').getBoundingClientRect().width };
+  });
+  assert.ok(before.haptics.length > 0 && before.haptics.every(Boolean), 'The fixture exercises disabled native haptic targets.');
+  await page.setViewportSize({ width: 400, height: 844 });
+  await page.waitForFunction(diameter => document.querySelector('.bubble-target').getBoundingClientRect().width > diameter, before.diameter);
+  await page.waitForTimeout(80);
+  const after = await page.evaluate(() => {
+    __stableResizeObserver.disconnect();
+    const nodes = [...document.querySelectorAll('#targets > *')];
+    return { keys: __interactionRenderer.layout.map(p => `${p.row}:${p.column}`),
+      haptics: [...document.querySelectorAll('.bubble-haptic')].map(input => input.disabled),
+      sameNodes: nodes.length === __stableResizeNodes.length && nodes.every((node, i) => node === __stableResizeNodes[i]),
+      positionsChanged: nodes.some((node, i) => node.style.cssText !== __stableResizeStyles[i]), mutations: __stableResizeMutations };
+  });
+  assert.deepEqual(after.keys, before.keys, 'The resize preserves the same logical cells.');
+  assert.deepEqual(after.haptics, before.haptics, 'Reduced motion keeps every native target disabled.');
+  assert.equal(after.sameNodes, true);
+  assert.equal(after.positionsChanged, true);
+  assert.deepEqual(after.mutations, [], 'Geometry-only resize must preserve native disabled state and target accessibility without attribute writes.');
+  return { targetCount: after.keys.length, nativeHapticTargets: after.haptics.length };
+}
+
 async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
   const { page } = await context({ isMobile: true, hasTouch: true }, targetBrowser);
   await page.locator('.bubble-target').nth(4).evaluate(button => button.click()); await waitPopped(page, 4);
@@ -330,6 +383,35 @@ async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
 }
 
 try {
+  await check('audio prepares silently during startup idle and the first trusted hold still sounds', async () => {
+    const { page } = await context({ probeAudioPreparation: true });
+    await page.waitForFunction(() => __interactionAudio.context !== null, null, { timeout: 2000 });
+    await analyse(page, { waitForRunning: false });
+    await page.waitForTimeout(80);
+    const before = await page.evaluate(() => {
+      return { activated: __trustedAudioActivations.length > 0, sourcesStarted: __audioSourceStarts.length,
+        maximumRms: Math.max(0, ...__audioProbe.frames), state: __interactionAudio.context.state };
+    });
+    assert.equal(before.activated, false, 'Preparation runs before any trusted interaction.');
+    assert.equal(before.sourcesStarted, 0, 'Startup preparation must not start an audio source.');
+    assert.equal(before.maximumRms, 0, 'Prepared audio stays silent before the first gesture.');
+    const point = await pocket(page);
+    await page.mouse.move(point.x, point.y); await page.mouse.down();
+    try {
+      await page.waitForFunction(() => __interactionAudio.context.state === 'running');
+      await waitPopped(page, 4);
+      // The first resumed output device can begin processing after the visual
+      // pop; wait for actual analyser data rather than assuming a fixed delay.
+      await page.waitForFunction(() => __audioProbe.frames.some(rms => rms > .001), null, { timeout: 2000 });
+      const popRms = await maxRms(page);
+      const audioState = await page.evaluate(() => ({ sources: __audioSourceStarts, frames: __audioProbe.frames.length,
+        state: __interactionAudio.context.state, enabled: __interactionAudio.enabled, outputGain: __interactionAudio.output.gain.value }));
+      assert.ok(popRms > .001, `The first trusted hold retains audible pop output, got ${popRms}; ${JSON.stringify(audioState)}`);
+      assert.ok(await page.evaluate(() => __audioSourceStarts.length > 0 && __audioSourceStarts.every(source => source.trustedActivation)),
+        'Audio sources start only after the first trusted activation.');
+      return { before, popRms };
+    } finally { await page.mouse.up(); }
+  });
   for (const selector of ['#theme', '#sound', '#settings-open']) {
     await check(`topbar ${selector} works on the first touch after popping`, () => topbarFirstTouchScenario(selector));
   }
@@ -568,6 +650,7 @@ try {
     const { webkit } = await import(pathToFileURL(path.join(webkitPackage, 'index.mjs')));
     webkitBrowser = await webkit.launch({ headless: true });
     report.browsers.webkit = webkitBrowser.version();
+    await check('WebKit same-topology resize preserves native haptic nodes and disabled attributes', () => stableResizeHapticsScenario(webkitBrowser));
     for (const selector of ['#theme', '#sound', '#settings-open']) {
       await check(`WebKit topbar ${selector} works on the first touch after a native haptic tap`, () => topbarFirstTouchScenario(selector, webkitBrowser));
     }
