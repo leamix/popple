@@ -104,7 +104,7 @@ try {
     const context = await browser.newContext({ viewport: { width: profile.width, height: profile.height }, deviceScaleFactor: profile.dpr });
     try {
       const url = `${origin}/__shader_oracle__`;
-      await context.route(url, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chpok shader equivalence</title>' }));
+      await context.route(url, route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Popple shader equivalence</title>' }));
       for (const [file, source] of dependencies) {
         await context.route(`${origin}${file}`, route => route.fulfill({ contentType: 'text/javascript', body: source }));
       }
