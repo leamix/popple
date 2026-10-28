@@ -1497,7 +1497,30 @@ try {
 process.exitCode = report.summary.failed ? 1 : 0;
 
 async function runWebKitSmoke() {
-  const modulePath = process.env.WEBKIT_MODULE || 'playwright-core/index.mjs';
+  let modulePath = process.env.WEBKIT_MODULE;
+  if (!modulePath && process.env.PLAYWRIGHT_MODULE) modulePath = path.join(process.env.PLAYWRIGHT_MODULE, 'index.mjs');
+  if (!modulePath) {
+    const candidates = [];
+    const cache = path.join(homedir(), '.npm/_npx');
+    if (existsSync(cache)) for (const folder of await readdir(cache)) {
+      const pkg = path.join(cache, folder, 'node_modules/playwright');
+      const registry = path.join(pkg, '../playwright-core/browsers.json');
+      if (!existsSync(registry)) continue;
+      const browsers = JSON.parse(await readFile(registry, 'utf8')).browsers;
+      const revision = browsers.find(item => item.name === 'webkit')?.revision;
+      if (existsSync(path.join(homedir(), 'Library/Caches/ms-playwright', `webkit-${revision}`))) candidates.push(path.join(pkg, 'index.mjs'));
+    }
+    const links = path.join(homedir(), 'Library/Caches/ms-playwright/.links');
+    if (existsSync(links)) for (const link of await readdir(links)) {
+      const pkg = (await readFile(path.join(links, link), 'utf8')).trim();
+      if (!existsSync(path.join(pkg, 'browsers.json'))) continue;
+      const browsers = JSON.parse(await readFile(path.join(pkg, 'browsers.json'), 'utf8')).browsers;
+      const revision = browsers.find(item => item.name === 'webkit')?.revision;
+      if (existsSync(path.join(homedir(), 'Library/Caches/ms-playwright', `webkit-${revision}`))) candidates.push(path.join(pkg, 'index.mjs'));
+    }
+    modulePath = candidates[0];
+  }
+  if (!modulePath) throw new Error('An installed Playwright package and matching WebKit are required. Nothing was installed.');
   const { webkit } = await import(pathToFileURL(modulePath));
   const results = { browser: 'WebKit', checks: [], errors: [], limitations: ['Mobile viewport and touch tap are emulated; continuous hold uses real mouse input in the WebKit engine. This is not physical iOS validation.'] };
   const webkitBrowser = await webkit.launch({ headless: true });

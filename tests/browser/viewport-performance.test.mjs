@@ -10,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Full production app, with test-only source wrappers. No runtime files or
 // packages are installed/modified. Run before/after sequentially on an idle host:
-// node tests/browser/viewport-performance.test.mjs --phase=before --ref=5fdce2a
+// node tests/browser/viewport-performance.test.mjs --phase=before --ref=976f9f1
 // node tests/browser/viewport-performance.test.mjs --phase=after
 // Optional: --profiles=desktop,mobile,mobile-cpu4,large-desktop --browser=chrome-metal
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
