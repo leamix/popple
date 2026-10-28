@@ -32,7 +32,7 @@ const profiles = [
   { name: 'large-desktop', width: 1920, height: 1080, dpr: 1, cpuRate: 1 },
 ].filter(profile => !requestedProfiles || requestedProfiles.includes(profile.name));
 assert.ok(profiles.length);
-const output = path.join(root, 'artifacts');
+const output = path.join(root, 'tests', '.artifacts');
 await mkdir(output, { recursive: true });
 
 // Freeze EVERY public file at invocation, including HTML/CSS/audio helpers.

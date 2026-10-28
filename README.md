@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/banner-light.svg">
-  <img alt="Popple: just pop. Anti-stress bubble wrap." src="./readme-assets/banner-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/banner-dark.gif">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/banner-light.gif">
+  <img alt="Popple: just pop. Anti-stress bubble wrap." src="./readme-assets/banner-dark.gif" width="100%">
 </picture>
 
 <br>
@@ -289,7 +289,7 @@ npm run test:browser:viewport-performance   # frame cost across device profiles
 npm run test:browser:shader                 # current renderer vs. the committed one
 ```
 
-By default the scenarios talk to `http://127.0.0.1:4174`. Set `POPPLE_URL` to point them somewhere else. Reports and screenshots are written to an `artifacts/` folder next to `tests/`.
+By default the scenarios talk to `http://127.0.0.1:4174`. Set `POPPLE_URL` to point them somewhere else. Reports and screenshots are written to `tests/.artifacts/`, which is git-ignored.
 
 The performance and shader scripts compare the working tree with an earlier Git revision, so they are meant for before/after checks while you change rendering code.
 

@@ -65,7 +65,7 @@ if (paired) {
   for (const [name, source] of baseline) sources.set(`/__baseline__/${name}`, source);
 }
 const sourceHashes = Object.fromEntries([...sources].map(([name, source]) => [name, createHash('sha256').update(source).digest('hex')]));
-const output = path.join(root, 'artifacts');
+const output = path.join(root, 'tests', '.artifacts');
 await mkdir(output, { recursive: true });
 
 async function installedPlaywright() {

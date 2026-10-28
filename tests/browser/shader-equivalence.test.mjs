@@ -400,7 +400,7 @@ try {
     failed: report.checks.flatMap(profile => profile.checks).filter(check => check.status !== 'passed').length,
     errors: report.errors.length,
   };
-  const output = path.join(root, 'artifacts');
+  const output = path.join(root, 'tests', '.artifacts');
   await mkdir(output, { recursive: true });
   const filename = browserFlavor === 'headless-shell' ? 'shader-equivalence.json' : `shader-equivalence-${browserFlavor}.json`;
   await writeFile(path.join(output, filename), JSON.stringify(report, null, 2) + '\n');

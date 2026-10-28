@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const output = path.join(root, 'artifacts');
+const output = path.join(root, 'tests', '.artifacts');
 const baseURL = process.env.POPPLE_URL || 'http://127.0.0.1:4174';
 const checkFilter = process.argv.find(arg => arg.startsWith('--check='))?.slice('--check='.length);
 await mkdir(output, { recursive: true });
