@@ -12,6 +12,10 @@
 
 <br>
 
+[![Play now](https://img.shields.io/badge/%E2%96%B6%20Play%20now-leamix.github.io%2Fpopple-2ea44f?style=for-the-badge)](https://leamix.github.io/popple/)
+
+<br>
+
 ![ES modules](https://img.shields.io/badge/JavaScript-ES%20modules-f7df1e?style=flat-square&logo=javascript&logoColor=black)
 ![WebGL](https://img.shields.io/badge/WebGL-GLSL%20shaders-990000?style=flat-square&logo=webgl&logoColor=white)
 ![Web Audio](https://img.shields.io/badge/Web%20Audio-synthesised%20sound-4f46e5?style=flat-square)
@@ -295,6 +299,8 @@ The performance and shader scripts compare the working tree with an earlier Git 
 ## Hosting
 
 The site is static. Upload the contents of [`public/`](public) to any web server or static host. Node.js is not needed on the server.
+
+The live demo at <https://leamix.github.io/popple/> is published to GitHub Pages by [`.github/workflows/pages.yml`](.github/workflows/pages.yml). On every push to `main` it uploads `public/` as is, with no build step. To enable it in a fork, set **Settings → Pages → Source** to **GitHub Actions**.
 
 Two things to check:
 
