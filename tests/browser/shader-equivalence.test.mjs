@@ -7,13 +7,13 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-// Compare the current renderer with the actual pre-optimization source from
-// Git. Both import the SAME current physics, sheet and membrane dependencies.
+// Compare the current renderer with the committed renderer for the current
+// visual design. Both use the SAME physics, sheet and membrane dependencies.
 // Force extension availability and the sheet feature switch to exercise both
 // batched passes and their legacy fallbacks. No main loop or installs involved.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-const ref = argument('ref') || '74a86bc';
+const ref = argument('ref') || 'db11589';
 const referenceMode = argument('reference-mode') || 'reference';
 assert.ok(['reference', 'legacy'].includes(referenceMode), 'Reference may use its normal batching or the independent uniform fallback.');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';

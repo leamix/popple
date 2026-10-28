@@ -13,14 +13,14 @@ import { createHash } from 'node:crypto';
 // Installed Playwright/browser caches only: this script never installs packages.
 // Example: BUBBLE_URL=http://127.0.0.1:4175 node tests/browser/performance.test.mjs --browser=chrome-metal
 // Focused shader comparison: add --paired --label=hardware-paired.
-// Frozen production baseline: add --ref=74a86bc --label=batching-baseline.
-// Full batching comparison: --paired --paired-ref=74a86bc --paired-deps=reference --label=batching-paired.
+// Frozen production baseline: add --ref=47374ff --label=batching-baseline.
+// Full batching comparison: --paired --paired-ref=47374ff --paired-deps=reference --label=batching-paired.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const ref = argument('ref');
 const paired = process.argv.includes('--paired');
-const pairedRef = argument('paired-ref') || '74a86bc';
+const pairedRef = argument('paired-ref') || '47374ff';
 const pairedDependencies = argument('paired-deps') || 'current';
 assert.ok(['current', 'reference'].includes(pairedDependencies), 'Paired dependencies: current or reference');
 const label = argument('label') || (ref ? `baseline-${ref.slice(0, 12)}` : 'current');
