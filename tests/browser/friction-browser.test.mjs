@@ -583,7 +583,7 @@ try {
     await page.locator('#reset').click();
     assert.deepEqual(await popped(page), []);
     assert.equal(await page.locator('[aria-busy="true"]').count(), 0);
-    assert.ok(!(await page.locator('#announcement').textContent()).includes('надуваются'));
+    assert.ok(!(await page.locator('#announcement').textContent()).includes('inflating'));
   });
   await check('refill ignores late assistive clicks without cancelling the next keyboard hold', async () => {
     const { page } = await context();

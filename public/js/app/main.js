@@ -5,6 +5,8 @@ import { createBubbleLayout } from '../core/layout.js';
 import { DeviceLighting } from '../rendering/lighting.js';
 import { APP_CONFIG } from '../core/config.js';
 import { advanceBrandAccent } from './brand-accent.js';
+import en from '../i18n/en.js';
+import ru from '../i18n/ru.js';
 
 const $ = selector => document.querySelector(selector);
 const markPointerInput=()=>{document.documentElement.dataset.inputModality='pointer';};
@@ -15,6 +17,10 @@ const storage = {
   get(key, fallback) { try { return localStorage.getItem('bubble.'+key) ?? fallback; } catch { return fallback; } },
   set(key,value) { try { localStorage.setItem('bubble.'+key,value); } catch { /* Private modes remain playable. */ } }
 };
+const languages={en,ru};
+let language=storage.get('language','en');
+if(!Object.hasOwn(languages,language))language='en';
+let messages=languages[language];
 const savedHold=Number(storage.get('hold',String(DEFAULT_HOLD_SECONDS)));
 const bubbles=[];
 const bubbleCells=new Map();
@@ -95,9 +101,8 @@ function updateBubbleButton(index) {
   } else {
     button.removeAttribute('aria-busy');button.removeAttribute('aria-disabled');
   }
-  button.setAttribute('aria-label',bubble.refilling?`Пузырёк ${index+1} надувается`:
-    bubble.popped?`Пузырёк ${index+1} лопнул. Можно помять плёнку`:
-      `Пузырёк ${index+1}. Удерживай, чтобы лопнуть`);
+  button.setAttribute('aria-label',bubble.refilling?messages.bubbleRefilling(index+1):
+    bubble.popped?messages.bubblePopped(index+1):messages.bubbleReady(index+1));
   if(hapticTargets[index])hapticTargets[index].disabled=reduced||bubble.refilling;
 }
 function tick(ms) {
@@ -120,15 +125,15 @@ function tick(ms) {
       audio.pop();
       effects.burst(p.x+burstPadding,p.y+burstPadding,p.radius,{dark,reducedMotion:reduced});
       buttons[i].dataset.popped='true';
-      buttons[i].setAttribute('aria-label',`Пузырёк ${i+1} лопнул. Можно помять плёнку`);
+      buttons[i].setAttribute('aria-label',messages.bubblePopped(i+1));
       poppedCount+=1;
-      $('#announcement').textContent=`Хлоп! ${poppedCount} из ${bubbles.length} пузырьков лопнули.`;
+      $('#announcement').textContent=messages.popped(poppedCount,bubbles.length);
       animateUntil=now+APP_CONFIG.popWakeSeconds;
       pulse(APP_CONFIG.hapticPopMilliseconds);
     }
     if(wasRefilling&&!b.refilling) {
       poppedCount-=1;updateBubbleButton(i);renderDirty=true;
-      if(!bubbles.some(bubble=>bubble.refilling))$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
+      if(!bubbles.some(bubble=>bubble.refilling))$('#announcement').textContent=messages.ready;
     }
     const animating=b.needsAnimation;
     if(wasAnimating&&!animating)renderDirty=true;
@@ -232,7 +237,7 @@ function resize() {
   }
   renderer?.resize(filmBounds.width,filmBounds.height,dpr,field);
   effects.resize(width+burstPadding*2,height+burstPadding*2,dpr);
-  $('#size-value').textContent=diameter===84?'≈ 2 см':Math.round(diameter/84*100)+'%';
+  $('#size-value').textContent=diameter===84?messages.defaultSize:Math.round(diameter/84*100)+'%';
   wake();
 }
 function scheduleResize() {
@@ -241,7 +246,7 @@ function scheduleResize() {
 }
 function setTheme() {
   document.documentElement.dataset.theme=dark?'dark':'light';
-  $('#theme').setAttribute('aria-label',dark?'Включить светлую тему':'Включить тёмную тему');
+  $('#theme').setAttribute('aria-label',dark?messages.lightTheme:messages.darkTheme);
   $('#theme .t-icon-swap').dataset.state=dark?'a':'b';
   $('meta[name="theme-color"]').content=dark?'#080b0e':'#dcebf4';
   storage.set('theme',dark?'dark':'light');wake(APP_CONFIG.themeWakeSeconds);
@@ -387,7 +392,7 @@ function resetFilm() {
   hapticTargets.forEach(input=>{input.checked=false;});
   buttons.forEach((_,i)=>updateBubbleButton(i));
   advanceBrandAccent();
-  $('#announcement').textContent=bubbles.some(b=>b.refilling)?'Пузырьки надуваются.':`Новая плёнка. ${bubbles.length} пузырьков.`;wake();
+  $('#announcement').textContent=bubbles.some(b=>b.refilling)?messages.refilling:messages.newFilm(bubbles.length);wake();
 }
 resetButton.addEventListener('click',resetFilm);
 const touchButtons=new Set(['#reset','#theme','#sound','#settings-open','#settings-close'].map($));
@@ -435,19 +440,19 @@ function finishControlTouch(event) {
 document.addEventListener('touchend',finishControlTouch,{capture:true,passive:false});
 document.addEventListener('touchcancel',finishControlTouch,{capture:true,passive:false});
 audio.setEnabled(storage.get('sound','true')==='true');
-function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?'Выключить звук':'Включить звук'); }
+function updateSound(){ $('#sound').setAttribute('aria-pressed',String(audio.enabled));$('#sound').setAttribute('aria-label',audio.enabled?messages.soundOff:messages.soundOn); }
 $('#sound').addEventListener('click',()=>{
   audio.setEnabled(!audio.enabled);if(audio.enabled)audio.unlock();
   storage.set('sound',String(audio.enabled));updateSound();
 });
 $('#size').value=diameter;
 $('#size').addEventListener('input',event=>{diameter=Number(event.target.value);storage.set('size',diameter);resize();});
-const holdFormat=new Intl.NumberFormat('ru-RU',{minimumFractionDigits:1,maximumFractionDigits:2});
 function updateHold() {
   const duration=bubbles[0].holdDuration;
   $('#hold').value=duration;
-  $('#hold-value').textContent=holdFormat.format(duration)+' с';
-  $('#hold').setAttribute('aria-valuetext',holdFormat.format(duration)+' секунды');
+  const formatted=new Intl.NumberFormat(language,{minimumFractionDigits:1,maximumFractionDigits:2}).format(duration);
+  $('#hold-value').textContent=messages.seconds(formatted);
+  $('#hold').setAttribute('aria-valuetext',messages.secondsLabel(formatted));
 }
 $('#hold').addEventListener('input',event=>{
   cancelAll();
@@ -487,16 +492,7 @@ function updateTilt() {
   $('#tilt').disabled=deviceLighting.pending;
   const status=deviceLighting.pending?'pending':tiltStatus;
   $('#tilt-permission').hidden=!tiltWanted||!['permission-required','denied'].includes(status);
-  const messages={
-    idle:'',pending:'Ждём разрешения на доступ к движению.',
-    listening:'Немного наклони телефон, чтобы оживить блики.',granted:'Блики следуют за движением телефона.',
-    denied:'Доступ к движению закрыт. Его можно разрешить в настройках браузера.',
-    unavailable:'На этом устройстве наклон недоступен.',insecure:'Для наклона открой страницу через HTTPS.',
-    'no-data':'Датчик пока не передаёт движение. Попробуй наклонить телефон.',
-    'permission-required':'Настройка включена. Разреши браузеру доступ к движению.',
-    reduced:'Наклон на паузе, пока включено «Меньше эффектов».',suspended:''
-  };
-  $('#tilt-status').textContent=tiltWanted?(messages[status]??''):'';
+  $('#tilt-status').textContent=tiltWanted?(messages.tiltStatus[status]??''):'';
 }
 $('#tilt').addEventListener('change',event=>{
   tiltWanted=event.target.checked;
@@ -512,12 +508,37 @@ function setReduced(value) {
   if(renderer)renderer.reducedMotion=reduced;
   const wasRefilling=bubbles.some(b=>b.refilling);
   if(reduced)for(const {bubble} of bubbleCells.values())if(bubble.refilling)bubble.reset();
-  if(reduced&&wasRefilling)$('#announcement').textContent='Плёнка готова. Можно лопать пузырьки.';
+  if(reduced&&wasRefilling)$('#announcement').textContent=messages.ready;
   poppedCount=bubbles.filter(b=>b.popped).length;
   buttons.forEach((_,i)=>updateBubbleButton(i));
   light=lightTarget={x:0,y:0,angle:0};deviceLighting.setReduced(reduced);effects.clear();updateTilt();wake();
 }
 $('#motion').addEventListener('change',event=>{setReduced(event.target.checked);storage.set('motion',String(reduced));});
+function setLanguage(value) {
+  language=Object.hasOwn(languages,value)?value:'en';messages=languages[language];
+  document.documentElement.lang=language;
+  $('meta[name="description"]').content=messages.description;
+  const text={'.intro h1':'heading','#reset span':'more','#render-error':'renderError',
+    '#settings-title':'settingsHeading','#settings-description':'settingsDescription',
+    '#language-label':'language','#size-label':'size','#size-description':'sizeDescription',
+    '#hold-label':'hold','#hold-description':'holdDescription','#tilt-label':'tilt',
+    '#tilt-description':'tiltDescription','#tilt-permission':'permission',
+    '#motion-label':'motion','.settings-footer':'footer'};
+  for(const [selector,key] of Object.entries(text))$(selector).textContent=messages[key];
+  for(const [selector,key] of Object.entries({'.wordmark':'restart','.topbar-actions':'controls',
+    '#settings-open':'settingsOpen','#settings-close':'close','#reset':'moreLabel','.playground':'playground'}))
+    $(selector).setAttribute('aria-label',messages[key]);
+  $('#theme').title=messages.themeTitle;$('#sound').title=messages.soundTitle;$('#settings-open').title=messages.settingsTitle;
+  $(`#language-${language}`).checked=true;
+  $('#size-value').textContent=diameter===84?messages.defaultSize:Math.round(diameter/84*100)+'%';
+  buttons.forEach((_,i)=>updateBubbleButton(i));
+  $('#announcement').textContent='';
+  updateSound();setTheme();updateHold();updateTilt();
+}
+document.querySelectorAll('input[name="language"]').forEach(input=>input.addEventListener('change',()=>{
+  storage.set('language',input.value);setLanguage(input.value);
+}));
+
 reducedQuery.addEventListener('change',event=>setReduced(event.matches));
 window.addEventListener('resize',scheduleResize);
 window.visualViewport?.addEventListener('resize',scheduleResize);
@@ -533,6 +554,6 @@ $('#film').addEventListener('webglcontextrestored',()=>{contextLost=false;device
 try { renderer=new FilmRenderer($('#film')); } catch(error) {
   console.error(error);$('#render-error').hidden=false;$('#targets').hidden=true;
 }
-updateViewportHeight();updateSound();setReduced(reduced);setTheme();resize();holdDuration=bubbles[0].holdDuration;updateHold();
+updateViewportHeight();updateSound();setReduced(reduced);setTheme();resize();holdDuration=bubbles[0].holdDuration;setLanguage(language);
 prepareAudioWhenIdle();
 if(tiltWanted) deviceLighting.enable();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { listRuntimeAt, readRuntimeAt } from './git-runtime.mjs';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -9,7 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Full production app, with test-only source wrappers. No runtime files or
 // packages are installed/modified. Run before/after sequentially on an idle host:
-// node tests/browser/viewport-performance.test.mjs --phase=before --ref=375cd90
+// node tests/browser/viewport-performance.test.mjs --phase=before --ref=5fdce2a
 // node tests/browser/viewport-performance.test.mjs --phase=after
 // Optional: --profiles=desktop,mobile,mobile-cpu4,large-desktop --browser=chrome-metal
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -43,11 +44,11 @@ async function runtimeFiles(folder = 'public') {
   return groups.flat().sort();
 }
 const names = ref
-  ? execFileSync('git', ['ls-tree', '-r', '--name-only', ref, '--', 'public'], { cwd: root, encoding: 'utf8' }).trim().split('\n')
+  ? listRuntimeAt(root, ref)
   : await runtimeFiles();
 const sources = new Map();
 for (const name of names) sources.set('/' + name.slice(7), ref
-  ? execFileSync('git', ['show', `${ref}:${name}`], { cwd: root })
+  ? readRuntimeAt(root, ref, name)
   : await readFile(path.join(root, name)));
 const sourceHashes = Object.fromEntries([...sources].map(([name, source]) => [name, createHash('sha256').update(source).digest('hex')]));
 

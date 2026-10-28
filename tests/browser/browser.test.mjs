@@ -335,6 +335,23 @@ function assertReflectionOrbit(neutral, tilted) {
 
 try {
   const { page } = await context({ viewport: { width: 1365, height: 900 }, deviceScaleFactor: 1 });
+  await check('language selection translates and persists', async () => {
+    const {page: localized} = await context({viewport: {width: 390, height: 844}});
+    assert.equal(await localized.locator('html').getAttribute('lang'), 'en');
+    assert.equal(await localized.locator('h1').textContent(), 'Just pop');
+    assert.equal(await localized.locator('meta[name=description]').getAttribute('content'), 'Popple is an anti-stress game. Just pop some bubbles.');
+    await localized.locator('#settings-open').click();
+    await localized.locator('#language-ru').check();
+    assert.equal(await localized.locator('h1').textContent(), 'Просто полопай');
+    assert.equal(await localized.locator('meta[name=description]').getAttribute('content'), 'Popple — антистресс-игра. Просто полопай пупырки.');
+    assert.match(await localized.locator('.bubble-target').first().getAttribute('aria-label'), /Пузырёк/);
+    await localized.reload();
+    assert.equal(await localized.locator('html').getAttribute('lang'), 'ru');
+    await localized.locator('#settings-open').click();
+    assert.equal(await localized.locator('#language-ru').isChecked(), true);
+    await localized.locator('#language-en').check();
+    assert.equal(await localized.locator('html').getAttribute('lang'), 'en');
+  });
   await check('full-screen film continues beneath controls with bubbles confined to the field', async () => {
     const details = [];
     for (const viewport of [{ width: 1365, height: 900 }, { width: 390, height: 844 }]) {
@@ -616,7 +633,7 @@ try {
     await probe.locator(`.bubble-target[data-index="${fresh.index}"]`).evaluate(button => button.click());
     await probe.waitForFunction(index => __bubbleStates[index].popped, fresh.index);
     const activePopped = await count(probe);
-    assert.match(await probe.locator('#announcement').textContent(), new RegExp(`${activePopped} из ${narrow.length} пузырьков`),
+    assert.match(await probe.locator('#announcement').textContent(), new RegExp(`${activePopped} of ${narrow.length} bubbles`),
       'Progress uses the current active scene count.');
     await resizeScene(probe, { width: 1450, height: 950 });
     const expanded = await scene(probe);
@@ -1164,11 +1181,11 @@ try {
     await prompt.evaluate(()=>window.dispatchEvent(new Event('blur')));
     assert.equal(await prompt.locator('#tilt').isChecked(),true);
     assert.equal(await prompt.locator('#tilt').isDisabled(),true);
-    assert.match(await prompt.locator('#tilt-status').textContent(),/Ждём разрешения/);
+    assert.match(await prompt.locator('#tilt-status').textContent(),/Waiting for motion access/);
     await prompt.evaluate(()=>__resolvePermission('denied'));
     assert.equal(await prompt.locator('#tilt').isDisabled(),false);
     assert.equal(await prompt.locator('#tilt-permission').isVisible(),true);
-    assert.match(await prompt.locator('#tilt-status').textContent(),/Доступ к движению закрыт/);
+    assert.match(await prompt.locator('#tilt-status').textContent(),/Motion access is blocked/);
     await prompt.locator('#tilt-permission').click();
     await prompt.evaluate(()=>__resolvePermission('granted'));
     assert.equal(await prompt.locator('#tilt').isDisabled(),false);

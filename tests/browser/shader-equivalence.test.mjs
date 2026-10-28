@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { readRuntimeAt } from './git-runtime.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -13,7 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // batched passes and their legacy fallbacks. No main loop or installs involved.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
-const ref = argument('ref') || 'd28325d';
+const ref = argument('ref') || '46ae88a';
 const referenceMode = argument('reference-mode') || 'reference';
 assert.ok(['reference', 'legacy'].includes(referenceMode), 'Reference may use its normal batching or the independent uniform fallback.');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
@@ -33,7 +33,7 @@ const modes = (argument('modes') || 'instanced,expanded,legacy,sheet-disabled').
 assert.ok(modes.length && modes.every(mode => ['instanced', 'expanded', 'legacy', 'sheet-disabled'].includes(mode)), 'Select known renderer modes.');
 const rendererFile = 'public/js/rendering/renderer.js';
 const current = await readFile(path.join(root, rendererFile), 'utf8');
-const baseline = execFileSync('git', ['show', `${ref}:${rendererFile}`], { cwd: root, encoding: 'utf8' });
+const baseline = readRuntimeAt(root, ref, rendererFile).toString('utf8');
 const dependencies = new Map();
 for (const file of ['config.js', 'layout.js', 'physics.js', 'sheet.js', 'membrane.js']) {
   dependencies.set(`/js/core/${file}`, await readFile(path.join(root, 'public/js/core', file), 'utf8'));

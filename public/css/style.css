@@ -118,3 +118,7 @@ html[data-reduced="true"] .switch-track, html[data-reduced="true"] .switch-track
   .t-icon-swap .t-icon { transition: none !important; }
   .reset, .icon-button, .permission-button, .switch-track, .switch-track::after { transition: none; }
 }
+.language-setting { border: 0; padding: 0; min-width: 0; }
+.language-setting legend { margin-bottom: 8px; padding: 0; font-size: 13px; }
+.language-setting label { display: inline-flex; align-items: center; min-height: 44px; gap: 7px; margin-right: 20px; font-size: 13px; cursor: pointer; }
+.language-setting input { accent-color: var(--accent); }

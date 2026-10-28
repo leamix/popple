@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#080b0e">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="description" content="Немного воздуха. Немного удовольствия. Интерактивная пупырчатая плёнка Popple.">
+  <meta name="description" content="Popple is an anti-stress game. Just pop some bubbles.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='27' fill='%2311181d' stroke='%23d9e8ef' stroke-width='2'/%3E%3Cellipse cx='23' cy='20' rx='11' ry='5' fill='%23fff' transform='rotate(-35 23 20)'/%3E%3C/svg%3E">
   <title>Popple</title>
   <link rel="stylesheet" href="./css/style.css">
@@ -16,18 +16,18 @@
 <body>
   <canvas id="film" aria-hidden="true"></canvas>
   <header class="topbar">
-    <a class="wordmark" href="./" aria-label="Popple, начать заново">Popple<canvas id="brand-accent" class="brand-accent" width="32" height="32" aria-hidden="true"></canvas></a>
-    <div class="topbar-actions" role="group" aria-label="Настройки плёнки">
-    <button class="icon-button" id="theme" aria-label="Включить светлую тему" title="Переключить тему">
+    <a class="wordmark" href="./" aria-label="Popple, start over">Popple<canvas id="brand-accent" class="brand-accent" width="32" height="32" aria-hidden="true"></canvas></a>
+    <div class="topbar-actions" role="group" aria-label="Film settings">
+    <button class="icon-button" id="theme" aria-label="Turn on light theme" title="Switch theme">
       <span class="t-icon-swap" data-state="a" aria-hidden="true">
         <svg class="t-icon" data-icon="a" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
         <svg class="t-icon" data-icon="b" viewBox="0 0 24 24"><path d="M20.5 14.2A8.6 8.6 0 0 1 9.8 3.5 8.6 8.6 0 1 0 20.5 14.2Z"/></svg>
       </span>
     </button>
-    <button id="sound" class="icon-button" aria-label="Выключить звук" aria-pressed="true" title="Звук">
+    <button id="sound" class="icon-button" aria-label="Turn off sound" aria-pressed="true" title="Sound">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m11 4-6 5H2v6h3l6 5Z"/><path class="sound-waves" d="M15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/><path class="sound-muted" d="m16 9 6 6m0-6-6 6"/></svg>
     </button>
-    <button id="settings-open" class="icon-button" aria-label="Настроить под себя" aria-haspopup="dialog" aria-controls="settings" title="Настройки">
+    <button id="settings-open" class="icon-button" aria-label="Customize your experience" aria-haspopup="dialog" aria-controls="settings" title="Settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.7 3-.5 2.1-1.4.8-2.1-.6-2.3 4 1.6 1.5v1.6l-1.6 1.5 2.3 4 2.1-.6 1.4.8.5 2.1h4.6l.5-2.1 1.4-.8 2.1.6 2.3-4-1.6-1.5v-1.6l1.6-1.5-2.3-4-2.1.6-1.4-.8-.5-2.1Z"/><circle cx="12" cy="11.6" r="3.1"/></svg>
     </button>
     </div>
@@ -35,60 +35,65 @@
   <main>
     <div class="intro">
       <div class="intro-title">
-        <h1>Просто полопай</h1>
-        <button id="reset" class="reset" type="button" aria-label="Ещё плёнку">
+        <h1>Just pop</h1>
+        <button id="reset" class="reset" type="button" aria-label="More bubble wrap">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1.5 7M4 4v6h6"/></svg>
-          <span>ещё</span>
+          <span>more</span>
         </button>
       </div>
     </div>
-    <section class="playground" aria-label="Пупырчатая плёнка">
+    <section class="playground" aria-label="Bubble wrap">
       <div class="sheet" id="sheet">
         <div id="targets" class="targets"></div>
       </div>
       <canvas id="bursts" aria-hidden="true"></canvas>
-      <p id="render-error" class="render-error" hidden>Не удалось включить графику. Попробуй открыть страницу в Safari или Chrome.</p>
+      <p id="render-error" class="render-error" hidden>Could not start graphics. Try opening this page in Safari or Chrome.</p>
     </section>
     <p class="sr-only" id="announcement" aria-live="polite" aria-atomic="true"></p>
   </main>
   <dialog id="settings" class="settings-dialog" aria-labelledby="settings-title" aria-describedby="settings-description">
     <div class="settings-header">
-      <h2 id="settings-title">Настроить под себя</h2>
-      <button id="settings-close" class="icon-button" aria-label="Закрыть настройки" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
+      <h2 id="settings-title">Make it yours</h2>
+      <button id="settings-close" class="icon-button" aria-label="Close settings" autofocus><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
     </div>
-    <p id="settings-description" class="settings-description">Пусть плёнка ощущается как тебе нравится.</p>
+    <p id="settings-description" class="settings-description">Make the bubble wrap feel just right.</p>
+    <fieldset class="settings-field language-setting">
+      <legend id="language-label">Language</legend>
+      <label><input id="language-en" type="radio" name="language" value="en" checked> English</label>
+      <label lang="ru"><input id="language-ru" type="radio" name="language" value="ru"> Русский</label>
+    </fieldset>
     <div class="settings-field">
-      <label class="setting-label" for="size">Размер пузырька <output id="size-value" for="size">≈ 2 см</output></label>
+      <label class="setting-label" for="size"><span id="size-label">Bubble size</span> <output id="size-value" for="size">≈ 2 cm</output></label>
       <input id="size" type="range" min="64" max="100" value="84" step="2" aria-describedby="size-description">
-      <p id="size-description">Размер на экранах отличается — подстрой под свой палец.</p>
+      <p id="size-description">Sizes vary between screens — adjust to fit your finger.</p>
     </div>
     <div class="settings-field">
-      <label class="setting-label" for="hold">Время до хлопка <output id="hold-value" for="hold">0,3 с</output></label>
+      <label class="setting-label" for="hold"><span id="hold-label">Time to pop</span> <output id="hold-value" for="hold">0.3 s</output></label>
       <input id="hold" type="range" min="0.2" max="2" value="0.3" step="0.02" aria-describedby="hold-description">
-      <p id="hold-description">Как долго удерживать пузырёк. По умолчанию — 0,3 с.</p>
+      <p id="hold-description">How long to hold a bubble. Default: 0.3 s.</p>
     </div>
     <div class="settings-field tilt-setting">
       <div class="tilt-row">
-        <span id="tilt-label">Блики при наклоне</span>
+        <span id="tilt-label">Highlights on tilt</span>
         <label class="ios-switch">
           <input id="tilt" type="checkbox" role="switch" aria-labelledby="tilt-label" aria-describedby="tilt-description tilt-status">
           <span class="switch-track" aria-hidden="true"></span>
         </label>
       </div>
-      <p id="tilt-description">Слегка двигаются, когда ты наклоняешь или поворачиваешь телефон.</p>
+      <p id="tilt-description">Highlights move slightly when you tilt or turn your phone.</p>
       <p id="tilt-status" class="tilt-status" role="status"></p>
-      <button id="tilt-permission" class="permission-button" type="button" hidden>Разрешить доступ</button>
+      <button id="tilt-permission" class="permission-button" type="button" hidden>Allow access</button>
     </div>
     <div class="settings-field motion-setting">
       <div class="tilt-row">
-        <span id="motion-label">Меньше эффектов</span>
+        <span id="motion-label">Fewer effects</span>
         <label class="ios-switch">
           <input id="motion" type="checkbox" role="switch" aria-labelledby="motion-label">
           <span class="switch-track" aria-hidden="true"></span>
         </label>
       </div>
     </div>
-    <p class="settings-footer">Настройки сохраняются сами.</p>
+    <p class="settings-footer">Settings save automatically.</p>
   </dialog>
   <script type="module" src="./js/app/brand-accent.js"></script>
   <script type="module" src="./js/app/main.js"></script>

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readRuntimeAt } from './git-runtime.mjs';
 import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -12,14 +13,14 @@ import { createHash } from 'node:crypto';
 // Installed Playwright/browser caches only: this script never installs packages.
 // Example: BUBBLE_URL=http://127.0.0.1:4175 node tests/browser/performance.test.mjs --browser=chrome-metal
 // Focused shader comparison: add --paired --label=hardware-paired.
-// Frozen production baseline: add --ref=bac7bd1 --label=batching-baseline.
-// Full batching comparison: --paired --paired-ref=bac7bd1 --paired-deps=reference --label=batching-paired.
+// Frozen production baseline: add --ref=46ae88a --label=batching-baseline.
+// Full batching comparison: --paired --paired-ref=46ae88a --paired-deps=reference --label=batching-paired.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const ref = argument('ref');
 const paired = process.argv.includes('--paired');
-const pairedRef = argument('paired-ref') || '5ed0f93';
+const pairedRef = argument('paired-ref') || '46ae88a';
 const pairedDependencies = argument('paired-deps') || 'current';
 assert.ok(['current', 'reference'].includes(pairedDependencies), 'Paired dependencies: current or reference');
 const label = argument('label') || (ref ? `baseline-${ref.slice(0, 12)}` : 'current');
@@ -39,7 +40,7 @@ async function captureModules(reference, entries = entryModules) {
     const name = entries[index];
     if (captured.has(name)) continue;
     const source = reference
-      ? execFileSync('git', ['show', `${reference}:public/${name}`], { cwd: root, encoding: 'utf8' })
+      ? readRuntimeAt(root, reference, `public/${name}`).toString('utf8')
       : await readFile(path.join(root, `public/${name}`), 'utf8');
     captured.set(name, source);
     // Resolve the actual frozen ES module graph. Optional new helpers are
@@ -60,7 +61,7 @@ if (paired) {
     ? await captureModules(pairedRef, [...entryModules])
     : new Map(captured);
   if (pairedDependencies === 'current') baseline.set('js/rendering/renderer.js',
-    execFileSync('git', ['show', `${pairedRef}:public/js/rendering/renderer.js`], { cwd: root, encoding: 'utf8' }));
+    readRuntimeAt(root, pairedRef, 'public/js/rendering/renderer.js').toString('utf8'));
   for (const [name, source] of baseline) sources.set(`/__baseline__/${name}`, source);
 }
 const sourceHashes = Object.fromEntries([...sources].map(([name, source]) => [name, createHash('sha256').update(source).digest('hex')]));
@@ -370,7 +371,7 @@ try {
   try {
     const paths=Object.keys(report.sourceHashes).filter(name=>!name.startsWith('/__baseline__/')).map(name=>`public${name}`);
     const candidate=report.ref||execFileSync('git',['log','-1','--format=%H','--',...paths],{cwd:root,encoding:'utf8'}).trim();
-    const matching=paths.every(name=>createHash('sha256').update(execFileSync('git',['show',`${candidate}:${name}`],{cwd:root})).digest('hex')===report.sourceHashes[name.slice(6)]);
+    const matching=paths.every(name=>createHash('sha256').update(readRuntimeAt(root,candidate,name)).digest('hex')===report.sourceHashes[name.slice(6)]);
     report.verifiedRuntimeCommit=matching?execFileSync('git',['rev-parse',candidate],{cwd:root,encoding:'utf8'}).trim():null;
   } catch { report.verifiedRuntimeCommit=null; }
   await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`);
