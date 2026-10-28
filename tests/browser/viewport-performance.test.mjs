@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // node tests/browser/viewport-performance.test.mjs --phase=after
 // Optional: --profiles=desktop,mobile,mobile-cpu4,large-desktop --browser=chrome-metal
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
+const baseURL = process.env.POPPLE_URL || 'http://127.0.0.1:4174';
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const phase = argument('phase') || 'after';
 const baselinePhase = argument('baseline') || 'before';

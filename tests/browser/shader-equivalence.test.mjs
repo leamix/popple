@@ -16,7 +16,7 @@ const argument = name => process.argv.find(value => value.startsWith(`--${name}=
 const ref = argument('ref') || 'db11589';
 const referenceMode = argument('reference-mode') || 'reference';
 assert.ok(['reference', 'legacy'].includes(referenceMode), 'Reference may use its normal batching or the independent uniform fallback.');
-const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
+const baseURL = process.env.POPPLE_URL || 'http://127.0.0.1:4174';
 const origin = new URL(baseURL).origin;
 const maxChannelError = 2;
 const profiles = [

@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const output = path.join(root, 'artifacts');
-const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
+const baseURL = process.env.POPPLE_URL || 'http://127.0.0.1:4174';
 const screenshotsOnly = process.argv.includes('--screenshots-only');
 const checkFilters = process.argv.filter(arg => arg.startsWith('--check=')).map(arg => arg.slice('--check='.length));
 const checkFilter = checkFilters[0];

@@ -12,7 +12,13 @@
 
 <br>
 
-[![Play now](https://img.shields.io/badge/%E2%96%B6%20Play%20now-leamix.github.io%2Fpopple-2ea44f?style=for-the-badge)](https://leamix.github.io/popple/)
+<a href="https://leamix.github.io/popple/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/play-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./readme-assets/play-light.svg">
+    <img alt="Play now" src="./readme-assets/play-dark.svg" width="268">
+  </picture>
+</a>
 
 <br>
 
@@ -29,14 +35,14 @@
 [How it works](#how-it-works) &nbsp;•&nbsp;
 [Project layout](#project-layout) &nbsp;•&nbsp;
 [Testing](#testing) &nbsp;•&nbsp;
-[Hosting](#hosting)
+[Demo](#demo)
 
 </div>
 
 <br>
 
 <p align="center">
-  <img src="./readme-assets/demo.gif" alt="Animated demo: holding bubbles until they pop, switching to the light theme, then getting a fresh sheet" width="600">
+  <img src="./readme-assets/demo.gif" alt="Gameplay recording: pressing and popping bubbles with a mouse, switching to the light theme, then getting a fresh sheet" width="640">
 </p>
 
 <picture>
@@ -53,7 +59,6 @@ It is a prototype with a deliberately small footprint:
 
 - No framework, no bundler, no `node_modules` at runtime.
 - No back end, no database, no accounts. The server only hands out files.
-- A pop never makes a network request. Sound is synthesised in the browser, and the graphics are drawn on your GPU.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
@@ -75,11 +80,11 @@ The server also prints a `Same Wi-Fi` address. Open it on your phone to try touc
 
 | Variable      | Default   | What it does                                                    |
 | ------------- | --------- | --------------------------------------------------------------- |
-| `BUBBLE_PORT` | `4174`    | Port for the dev server.                                        |
-| `BUBBLE_HOST` | `0.0.0.0` | Interface to listen on. Use `127.0.0.1` to stay on this machine. |
+| `POPPLE_PORT` | `4174`    | Port for the dev server.                                        |
+| `POPPLE_HOST` | `0.0.0.0` | Interface to listen on. Use `127.0.0.1` to stay on this machine. |
 
 ```sh
-BUBBLE_HOST=127.0.0.1 BUBBLE_PORT=8080 npm start
+POPPLE_HOST=127.0.0.1 POPPLE_PORT=8080 npm start
 ```
 
 > [!NOTE]
@@ -110,7 +115,7 @@ There are no audio files. Each pop is generated with Web Audio from five sound f
 <td width="50%" valign="top">
 
 **✨ Live highlights**<br>
-The film is drawn with WebGL and GLSL shaders. Highlights follow the mouse, or tilt with your phone if you allow motion access. Highlights move, but the bubble shapes do not.
+The film is drawn with WebGL and GLSL shaders. Highlights follow the mouse, or tilt with your phone if you allow motion access. Highlights move, but the bubble shapes do not. Tilt works only on secure pages (HTTPS or `localhost`).
 
 **🌗 Light and dark themes**<br>
 Switch themes at any time. Popped bubbles stay popped.
@@ -233,7 +238,7 @@ Product and interaction numbers live in one file, [`public/js/core/config.js`](p
 
 ```text
 app/
-├── public/                  # the whole site; this is what gets hosted
+├── public/                  # the whole site
 │   ├── index.html
 │   ├── css/style.css
 │   └── js/
@@ -284,7 +289,7 @@ npm run test:browser:viewport-performance   # frame cost across device profiles
 npm run test:browser:shader                 # current renderer vs. the committed one
 ```
 
-By default the scenarios talk to `http://127.0.0.1:4174`. Set `BUBBLE_URL` to point them somewhere else. Reports and screenshots are written to an `artifacts/` folder next to `tests/`.
+By default the scenarios talk to `http://127.0.0.1:4174`. Set `POPPLE_URL` to point them somewhere else. Reports and screenshots are written to an `artifacts/` folder next to `tests/`.
 
 The performance and shader scripts compare the working tree with an earlier Git revision, so they are meant for before/after checks while you change rendering code.
 
@@ -296,16 +301,19 @@ The performance and shader scripts compare the working tree with an earlier Git 
   <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
-## Hosting
+## Demo
 
-The site is static. Upload the contents of [`public/`](public) to any web server or static host. Node.js is not needed on the server.
+Live demo at <https://leamix.github.io/popple/>
 
-The live demo at <https://leamix.github.io/popple/> is just the contents of `public/`, published as is.
-
-Two things to check:
-
-- **MIME types.** The server must send `.js` files as JavaScript, because ES modules are strict about this. Nginx, Apache and common static hosts do it by default.
-- **HTTPS.** Browsers expose phone motion sensors only on secure pages. Without HTTPS the game still works, but **Highlights on tilt** will not. `localhost` counts as secure.
+<p align="center">
+  <a href="https://leamix.github.io/popple/">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/play-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="./readme-assets/play-light.svg">
+      <img alt="Play now" src="./readme-assets/play-dark.svg" width="268">
+    </picture>
+  </a>
+</p>
 
 <br>
 

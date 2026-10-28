@@ -11,12 +11,12 @@ import { createHash } from 'node:crypto';
 // A render-only scaling probe. It imports a frozen snapshot of the actual
 // production modules through browser routes; no benchmark code ships to users.
 // Installed Playwright/browser caches only: this script never installs packages.
-// Example: BUBBLE_URL=http://127.0.0.1:4175 node tests/browser/performance.test.mjs --browser=chrome-metal
+// Example: POPPLE_URL=http://127.0.0.1:4175 node tests/browser/performance.test.mjs --browser=chrome-metal
 // Focused shader comparison: add --paired --label=hardware-paired.
 // Frozen production baseline: add --ref=47374ff --label=batching-baseline.
 // Full batching comparison: --paired --paired-ref=47374ff --paired-deps=reference --label=batching-paired.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const baseURL = process.env.BUBBLE_URL || 'http://127.0.0.1:4174';
+const baseURL = process.env.POPPLE_URL || 'http://127.0.0.1:4174';
 const argument = name => process.argv.find(value => value.startsWith(`--${name}=`))?.slice(name.length + 3);
 const ref = argument('ref');
 const paired = process.argv.includes('--paired');
