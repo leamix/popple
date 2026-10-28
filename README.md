@@ -134,7 +134,7 @@ A Canvas 2D layer draws short strokes around each pop. It sits above the film as
 - **Reduced motion.** The game respects `prefers-reduced-motion`. It also has its own **Fewer effects** switch.
 - **Sound and vibration.** Sound can be muted. Vibration is used only where the browser supports it.
 - **Languages.** English and Russian. The choice is saved.
-- **Saved settings.** Theme, sound, size, hold time, tilt and language are stored in `localStorage` under the `bubble.` prefix. If storage is blocked, for example in a private window, the game still works.
+- **Saved settings.** Theme, sound, size, hold time, tilt and language are stored in `localStorage` under the `popple.` prefix. If storage is blocked, for example in a private window, the game still works.
 
 <table>
 <tr>

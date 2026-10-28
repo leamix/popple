@@ -60,10 +60,10 @@ async function context(options = {}, targetBrowser = browser) {
   const ctx = await targetBrowser.newContext({ viewport: { width: 390, height: 844 }, ...browserOptions });
   contexts.push(ctx);
   await ctx.addInitScript(({ hold, probeAudioPreparation, reduced }) => {
-    localStorage.setItem('bubble.hold', String(hold));
-    localStorage.setItem('bubble.sound', 'true');
-    localStorage.setItem('bubble.tilt', 'false');
-    localStorage.setItem('bubble.motion', String(reduced));
+    localStorage.setItem('popple.hold', String(hold));
+    localStorage.setItem('popple.sound', 'true');
+    localStorage.setItem('popple.tilt', 'false');
+    localStorage.setItem('popple.motion', String(reduced));
     window.__hapticCalls = [];
     Object.defineProperty(navigator, 'vibrate', { configurable: true, value: duration => {
       __hapticCalls.push({ duration, active: (window.__bubbleStates ?? []).flatMap((b, index) => b.active ? [index] : []) });
@@ -238,22 +238,22 @@ async function firstRefillTouchScenario(targetBrowser = browser) {
   await page.locator('.bubble-target').nth(4).focus();
   const point = await pocket(page, 4);
   if (native) await page.touchscreen.tap(point.x, point.y);
-  const accent = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+  const accent = await page.evaluate(() => sessionStorage.getItem('popple.brandAccent'));
   await page.evaluate(() => {
     window.__resetAccentWrites = [];
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function(key, value) {
-      if (this === sessionStorage && key === 'bubble.brandAccent') __resetAccentWrites.push(value);
+      if (this === sessionStorage && key === 'popple.brandAccent') __resetAccentWrites.push(value);
       return setItem.call(this, key, value);
     };
   });
   await page.locator('#reset').tap();
   assert.ok(await page.evaluate(() => __bubbleStates[4].refilling), 'the first trusted tap must start inflation');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'reset');
-  const nextAccent = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+  const nextAccent = await page.evaluate(() => sessionStorage.getItem('popple.brandAccent'));
   assert.notEqual(nextAccent, accent);
   await page.waitForTimeout(120);
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent')), nextAccent);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem('popple.brandAccent')), nextAccent);
   assert.equal(await page.evaluate(() => __resetAccentWrites.length), 1, 'one trusted touch must perform only one refill action');
   return { nativeHapticTargets: native, redirected, direct };
 }
@@ -308,7 +308,7 @@ async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
     window.__settingsOpens = 0;
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function(key, value) {
-      if (this === localStorage && ['bubble.theme', 'bubble.sound'].includes(key)) __controlWrites.push({ key, value });
+      if (this === localStorage && ['popple.theme', 'popple.sound'].includes(key)) __controlWrites.push({ key, value });
       return setItem.call(this, key, value);
     };
     const showModal = HTMLDialogElement.prototype.showModal;
@@ -331,7 +331,7 @@ async function topbarFirstTouchScenario(selector, targetBrowser = browser) {
     assert.deepEqual(after.switches, before.switches, 'a topbar touch must not toggle a bubble haptic switch');
     const counts = await page.evaluate(() => ({ writes: __controlWrites, opens: __settingsOpens }));
     if (selector === '#settings-open') assert.equal(counts.opens, 1, 'one touch must open the dialog once');
-    else assert.equal(counts.writes.filter(item => item.key === (selector === '#theme' ? 'bubble.theme' : 'bubble.sound')).length, 1,
+    else assert.equal(counts.writes.filter(item => item.key === (selector === '#theme' ? 'popple.theme' : 'popple.sound')).length, 1,
       'one touch must toggle the setting once');
     return after;
   };

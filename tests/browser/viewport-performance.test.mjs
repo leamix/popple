@@ -258,7 +258,7 @@ try {
       isMobile: !!profile.touch, hasTouch: !!profile.touch, reducedMotion: 'no-preference' });
     try {
       await context.addInitScript(installProbe);
-      await context.addInitScript(() => { localStorage.setItem('bubble.sound', 'true'); localStorage.setItem('bubble.tilt', 'false'); });
+      await context.addInitScript(() => { for (const prefix of ['bubble.', 'popple.']) { localStorage.setItem(prefix + 'sound', 'true'); localStorage.setItem(prefix + 'tilt', 'false'); } });
       await context.route('**/*', route => {
         const url = new URL(route.request().url());
         if (url.origin !== new URL(baseURL).origin) return route.abort();

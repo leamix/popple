@@ -846,11 +846,11 @@ try {
   });
   await check('reset restores all active pockets', () => reset(page));
   await check('«Ещё» changes the logo accent without repeating it', async () => {
-    const previous = await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent'));
+    const previous = await page.evaluate(() => sessionStorage.getItem('popple.brandAccent'));
     assert.notEqual(previous, null);
     await page.locator('#reset').click();
     await page.waitForTimeout(100);
-    assert.notEqual(await page.evaluate(() => sessionStorage.getItem('bubble.brandAccent')), previous);
+    assert.notEqual(await page.evaluate(() => sessionStorage.getItem('popple.brandAccent')), previous);
   });
   await check('three icon controls and modal support focus, escape, backdrop and saved timing', async () => {
     assert.equal(await page.locator('.topbar-actions > button').count(),3);
@@ -1158,14 +1158,14 @@ try {
     assert.ok(await tilt.evaluate(()=>Math.abs(__lastLight.angle)>.25&&Math.abs(__lastLight.angle)<=.95),'Reloaded sensor events must still orbit the reflections.');
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
     await tilt.locator('#tilt').uncheck();
-    assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');
+    assert.equal(await tilt.evaluate(()=>localStorage.getItem('popple.tilt')),'false');
     await tilt.reload();await tilt.waitForFunction(()=>__bubbleStates?.length>0);
     await tilt.locator('#settings-open').click();
     assert.equal(await tilt.locator('#tilt').isChecked(),false);
     assert.equal(await tilt.locator('#tilt-permission').isVisible(),false);
     assert.equal(await tilt.evaluate(()=>__permissionCalls),0);
     await tilt.locator('#tilt').check();
-    assert.equal(await tilt.evaluate(()=>localStorage.getItem('bubble.tilt')),'true');
+    assert.equal(await tilt.evaluate(()=>localStorage.getItem('popple.tilt')),'true');
     assert.equal(await tilt.evaluate(()=>__permissionCalls),1);
     await tilt.waitForTimeout(250);
     await screenshot(tilt,'mobile-settings-tilt-on.png');
@@ -1226,7 +1226,7 @@ try {
     });
     await mobile.setViewportSize({ width: 390, height: 844 });
     await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length > 0);
-    await mobile.evaluate(() => { localStorage.setItem('bubble.size', '84'); localStorage.setItem('bubble.theme', 'light'); });
+    await mobile.evaluate(() => { localStorage.setItem('popple.size', '84'); localStorage.setItem('popple.theme', 'light'); });
     await mobile.reload(); await mobile.waitForFunction(() => __bubbleStates?.length > 0);
     await mobile.waitForTimeout(250); await screenshot(mobile, 'mobile-light.png');
     await mobile.evaluate(() => __bubbleStates[4].setHoldDuration(2));
@@ -1611,7 +1611,7 @@ async function runWebKitSmoke() {
       await page.locator('#tilt').uncheck();
       await page.reload();await page.locator('#settings-open').tap();
       assert.equal(await page.locator('#tilt').isChecked(),false);
-      assert.equal(await page.evaluate(()=>localStorage.getItem('bubble.tilt')),'false');
+      assert.equal(await page.evaluate(()=>localStorage.getItem('popple.tilt')),'false');
       assert.equal(await page.evaluate(()=>__permissionCalls),0);
     });
     await check('no runtime or console errors', async () => assert.deepEqual(results.errors, []));

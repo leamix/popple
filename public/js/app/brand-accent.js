@@ -40,12 +40,12 @@ function initializeBrandAccent() {
   if (!canvas) return;
   let previous = -1;
   try {
-    const saved = sessionStorage.getItem('bubble.brandAccent');
+    const saved = sessionStorage.getItem('popple.brandAccent');
     if (saved !== null) previous = Number(saved);
   } catch { /* Storage can be unavailable without affecting the logo. */ }
   let kind = chooseBrandAccent(previous);
   const persist = () => {
-    try { sessionStorage.setItem('bubble.brandAccent', String(kind)); } catch { /* Keep the current accent. */ }
+    try { sessionStorage.setItem('popple.brandAccent', String(kind)); } catch { /* Keep the current accent. */ }
   };
   persist();
   const render = () => drawBrandAccent(canvas, kind, document.documentElement.dataset.theme !== 'light');
