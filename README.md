@@ -1,9 +1,9 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/banner-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/banner-light.svg">
-  <img alt="Popple: just pop. Anti-stress bubble wrap." src="./assets/banner-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/banner-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/banner-light.svg">
+  <img alt="Popple: just pop. Anti-stress bubble wrap." src="./readme-assets/banner-dark.svg" width="100%">
 </picture>
 
 <br>
@@ -32,13 +32,13 @@
 <br>
 
 <p align="center">
-  <img src="./assets/demo.gif" alt="Animated demo: holding bubbles until they pop, switching to the light theme, then getting a fresh sheet" width="600">
+  <img src="./readme-assets/demo.gif" alt="Animated demo: holding bubbles until they pop, switching to the light theme, then getting a fresh sheet" width="600">
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## What is Popple?
@@ -52,9 +52,9 @@ It is a prototype with a deliberately small footprint:
 - A pop never makes a network request. Sound is synthesised in the browser, and the graphics are drawn on your GPU.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## Quick start
@@ -82,9 +82,9 @@ BUBBLE_HOST=127.0.0.1 BUBBLE_PORT=8080 npm start
 > Open the page through the server, not by double-clicking `index.html`. Browsers block ES module imports on `file://` URLs.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## Features
@@ -130,24 +130,24 @@ A Canvas 2D layer draws short strokes around each pop. It sits above the film as
 <table>
 <tr>
 <td align="center" width="50%">
-<img src="./assets/screenshot-light.png" alt="Light theme on desktop with several popped bubbles" width="420"><br>
+<img src="./readme-assets/screenshot-light.png" alt="Light theme on desktop with several popped bubbles" width="420"><br>
 <sub>Light theme on desktop</sub>
 </td>
 <td align="center" width="25%">
-<img src="./assets/screenshot-mobile.png" alt="Dark theme on a phone-sized screen" width="190"><br>
+<img src="./readme-assets/screenshot-mobile.png" alt="Dark theme on a phone-sized screen" width="190"><br>
 <sub>Dark theme on a phone</sub>
 </td>
 <td align="center" width="25%">
-<img src="./assets/screenshot-settings.png" alt="Settings dialog with language, bubble size, hold time and tilt options" width="190"><br>
+<img src="./readme-assets/screenshot-settings.png" alt="Settings dialog with language, bubble size, hold time and tilt options" width="190"><br>
 <sub>Settings dialog</sub>
 </td>
 </tr>
 </table>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## How it works
@@ -155,9 +155,9 @@ A Canvas 2D layer draws short strokes around each pop. It sits above the film as
 The code is split by responsibility. Input goes into simulation state. The state is then turned into pixels and sound.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/architecture-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/architecture-light.svg">
-  <img alt="Architecture: input flows into simulation state, which drives the WebGL renderer, the pop sound and the comic burst layer" src="./assets/architecture-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/architecture-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/architecture-light.svg">
+  <img alt="Architecture: input flows into simulation state, which drives the WebGL renderer, the pop sound and the comic burst layer" src="./readme-assets/architecture-dark.svg" width="100%">
 </picture>
 
 | Layer | Folder | Job |
@@ -220,9 +220,9 @@ Product and interaction numbers live in one file, [`public/js/core/config.js`](p
 </details>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## Project layout
@@ -242,15 +242,15 @@ app/
 ├── tests/
 │   ├── unit/                # deterministic Node tests
 │   └── browser/             # Playwright scenarios
-└── assets/                  # README images only; not part of the site
+└── readme-assets/           # images for this README only; not part of the site
 ```
 
 The `audio/friction*.js` files are an experiment that is kept in the repository but not used by `main.js` right now.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## Testing
@@ -287,9 +287,9 @@ The performance and shader scripts compare the working tree with an earlier Git 
 </details>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./assets/divider-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="./assets/divider-light.svg">
-  <img alt="" src="./assets/divider-dark.svg" width="100%">
+  <source media="(prefers-color-scheme: dark)" srcset="./readme-assets/divider-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./readme-assets/divider-light.svg">
+  <img alt="" src="./readme-assets/divider-dark.svg" width="100%">
 </picture>
 
 ## Hosting
