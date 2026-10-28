@@ -300,7 +300,7 @@ The performance and shader scripts compare the working tree with an earlier Git 
 
 The site is static. Upload the contents of [`public/`](public) to any web server or static host. Node.js is not needed on the server.
 
-The live demo at <https://leamix.github.io/popple/> is published to GitHub Pages by [`.github/workflows/pages.yml`](.github/workflows/pages.yml). On every push to `main` it uploads `public/` as is, with no build step. To enable it in a fork, set **Settings → Pages → Source** to **GitHub Actions**.
+The live demo at <https://leamix.github.io/popple/> is just the contents of `public/`, published as is.
 
 Two things to check:
 
