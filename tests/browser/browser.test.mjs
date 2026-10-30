@@ -335,6 +335,65 @@ function assertReflectionOrbit(neutral, tilted) {
 
 try {
   const { page } = await context({ viewport: { width: 1365, height: 900 }, deviceScaleFactor: 1 });
+  await check('desktop title shares the topbar and frees a bubble row', async () => {
+    const { ctx, page: probe } = await context({ viewport: { width: 1365, height: 900 } });
+    const geometry = await probe.evaluate(() => {
+      const rect = selector => {
+        const { left, right, top, bottom } = document.querySelector(selector).getBoundingClientRect();
+        return { left, right, top, bottom };
+      };
+      return { title: rect('.intro-title'), logo: rect('.wordmark'), actions: rect('.topbar-actions'),
+        header: rect('.topbar'), field: rect('.playground'), inHeader: !!document.querySelector('header .intro'),
+        titleFont: parseFloat(getComputedStyle(document.querySelector('h1')).fontSize),
+        buttonFont: parseFloat(getComputedStyle(document.querySelector('#reset')).fontSize) };
+    });
+    assert.ok(geometry.inHeader, 'The heading and reset button belong to the header.');
+    assert.ok(geometry.titleFont < 42 && geometry.buttonFont < 42, 'The desktop heading and button are smaller.');
+    assert.ok(geometry.field.top - geometry.header.bottom >= 16, 'The bubble field has space below the header.');
+    const centerY = rect => (rect.top + rect.bottom) / 2;
+    const baselineDifference = await probe.evaluate(() => {
+      const markers = ['h1', '#reset span'].map(selector => {
+        const marker = document.createElement('span');
+        marker.style.cssText = 'display:inline-block;width:0;height:0;padding:0;margin:0;';
+        document.querySelector(selector).append(marker);
+        return marker;
+      });
+      const difference = Math.abs(markers[0].getBoundingClientRect().top - markers[1].getBoundingClientRect().top);
+      markers.forEach(marker => marker.remove());
+      return difference;
+    });
+    assert.ok(baselineDifference < 1, `Heading and button text share a baseline; difference: ${baselineDifference}px.`);
+    assert.ok(Math.abs(centerY(geometry.title) - centerY(geometry.logo)) < 1, 'Title and logo share the same row.');
+    assert.ok(geometry.title.left > geometry.logo.right && geometry.title.right < geometry.actions.left,
+      'The title does not overlap the logo or controls.');
+    const rows = (await inspectStaggeredLayout(probe)).rowCounts.length;
+    await screenshot(probe, 'desktop-header-spacing.png');
+    await probe.evaluate(() => document.querySelector('main').prepend(document.querySelector('.intro')));
+    await probe.addStyleTag({ content: '@media (min-width: 768px) { main { padding-top: 13px !important; } .intro { position: static !important; transform: none !important; height: auto !important; padding: 0 20px !important; } .intro-title { font-size: 42px !important; } .intro-title .reset { font-size: inherit !important; } }' });
+    await probe.waitForTimeout(150);
+    const previousRows = (await inspectStaggeredLayout(probe)).rowCounts.length;
+    assert.ok(rows > previousRows, `The freed space adds a row: ${previousRows} → ${rows}.`);
+    await ctx.close();
+    const { ctx: narrowContext, page: narrow } = await context({ viewport: { width: 768, height: 700 } });
+    await narrow.locator('#settings-open').click();
+    await narrow.locator('#language-ru').check();
+    await narrow.locator('#settings-close').click();
+    const narrowGeometry = await narrow.evaluate(() => {
+      const rect = selector => document.querySelector(selector).getBoundingClientRect();
+      return { titleLeft: rect('.intro-title').left, titleRight: rect('.intro-title').right,
+        logoRight: rect('.wordmark').right, actionsLeft: rect('.topbar-actions').left,
+        titleTop: rect('.intro-title').top,
+        titleCenter: (rect('.intro-title').top + rect('.intro-title').bottom) / 2,
+        logoCenter: (rect('.wordmark').top + rect('.wordmark').bottom) / 2 };
+    });
+    assert.ok(narrowGeometry.titleLeft > narrowGeometry.logoRight && narrowGeometry.titleRight < narrowGeometry.actionsLeft,
+      'The Russian title also fits beside controls at the narrow desktop breakpoint.');
+    assert.ok(Math.abs(narrowGeometry.titleCenter - narrowGeometry.logoCenter) < 1);
+    assert.ok(narrowGeometry.titleTop >= 14, `The title keeps a small top inset, got ${narrowGeometry.titleTop}px.`);
+    await narrow.locator('#reset').click();
+    await narrowContext.close();
+    return { rows, previousRows, geometry };
+  });
   await check('language selection translates and persists', async () => {
     const {page: localized} = await context({viewport: {width: 390, height: 844}});
     assert.equal(await localized.locator('html').getAttribute('lang'), 'en');
@@ -558,7 +617,7 @@ try {
       visualViewport.dispatchEvent(new Event('resize'));
     });
     await probe.waitForFunction(() => Math.abs(document.querySelector('.playground').getBoundingClientRect().bottom - 720) < 1);
-    await probe.addStyleTag({ content: '@media (max-width: 540px) { .topbar { padding-top: 58px; height: 136px; } }' });
+    await probe.addStyleTag({ content: '@media (max-width: 540px) { .topbar { padding-top: 58px; } }' });
     await probe.waitForTimeout(120);
     const safeArea = await inspectViewportField(probe);
     await inspectMobileFieldSpacing(probe);
